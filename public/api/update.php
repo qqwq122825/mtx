@@ -1,5 +1,6 @@
 <?php
 declare(strict_types=1);
+if (!defined('MTX_FRONT_CONTROLLER')) { http_response_code(404); exit; }
 use MTX\{Http,Packages,Releases,Security,Problem};
 $app=require dirname(__DIR__,2).'/src/bootstrap.php';
 Http::method('GET');

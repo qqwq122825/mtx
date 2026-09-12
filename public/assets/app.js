@@ -41,7 +41,7 @@ document.querySelectorAll('.upload-form').forEach(form => form.addEventListener(
   xhr.onload = () => {
     let response;
     try { response = JSON.parse(xhr.responseText); } catch { response = null; }
-    if (xhr.status >= 200 && xhr.status < 300 && response?.redirect?.startsWith('/admin/')) window.location.assign(response.redirect);
+    if (xhr.status >= 200 && xhr.status < 300 && typeof response?.redirect === 'string' && response.redirect.startsWith(form.getAttribute('action').replace(/action\.php$/, '?'))) window.location.assign(response.redirect);
     else { button.disabled = false; status.textContent = response?.error?.message || `上传未完成（HTTP ${xhr.status}），请检查服务器上传额度或重新登录。`; }
   };
   xhr.onerror = xhr.ontimeout = () => { button.disabled = false; status.textContent = '连接中断或请求超时。请先刷新检查版本记录，避免重复上传。'; };

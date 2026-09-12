@@ -1,45 +1,51 @@
-# Replace domain, certificate and PHP-FPM socket with actual server values.
-# Never configure the repository root as document_root.
-# This example assumes a dedicated hostname and PHP-FPM terminating behind local Nginx.
+# Replace RANDOM_ENTRY with config.local.php mount_path (without its leading /).
+# Nginx terminates TLS; document_root MUST be public, never the project root.
 limit_req_zone $binary_remote_addr zone=mtx_api:10m rate=10r/s;
 limit_req_zone $binary_remote_addr zone=mtx_admin:10m rate=2r/s;
-
 server {
     listen 80;
-    server_name updates.example.com;
-    return 301 https://$host$request_uri;
+    server_name mtx.jk92.cc;
+    location = / { return 404; }
+    location ^~ /RANDOM_ENTRY/ { return 301 https://$host$request_uri; }
+    location / { return 404; }
 }
 server {
     listen 443 ssl;
-    server_name updates.example.com;
-    ssl_certificate /etc/letsencrypt/live/updates.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/updates.example.com/privkey.pem;
+    server_name mtx.jk92.cc;
+    ssl_certificate /etc/letsencrypt/live/mtx.jk92.cc/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mtx.jk92.cc/privkey.pem;
     root /srv/mtx/public;
-    index index.php;
     client_max_body_size 260m;
     client_body_timeout 300s;
 
-    location = / { return 302 /admin/; }
-    location = /admin { return 302 /admin/; }
-    location = /admin/ { rewrite ^ /admin/index.php last; }
-    location ~ ^/admin/(index|login|action)\.php$ {
+    location = /RANDOM_ENTRY { return 302 /RANDOM_ENTRY/admin/; }
+    location ~ ^/RANDOM_ENTRY(/|/admin(/(index|login|action)\.php|/)?)$ {
         limit_req zone=mtx_admin burst=15 nodelay;
         include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param SCRIPT_FILENAME $document_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
         fastcgi_param HTTPS on;
         fastcgi_pass unix:/run/php/php8.5-fpm.sock;
-        fastcgi_read_timeout 300s;
+        fastcgi_read_timeout 600s;
     }
-    location ~ ^/api/(update|download-ticket|download)\.php$ {
+    location ~ ^/RANDOM_ENTRY/api/(update|download-ticket|download)\.php$ {
         limit_req zone=mtx_api burst=30 nodelay;
         include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param SCRIPT_FILENAME $document_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
         fastcgi_param HTTPS on;
         fastcgi_pass unix:/run/php/php8.5-fpm.sock;
-        fastcgi_read_timeout 300s;
-        # Signed links contain temporary bearer credentials; do not log query strings.
+        fastcgi_read_timeout 900s;
+        # Do not persist query strings containing temporary download credentials.
         access_log off;
     }
-    location ~ ^/assets/app\.(css|js)$ { try_files $uri =404; }
+    location ~ ^/RANDOM_ENTRY/assets/app\.(css|js)$ {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param HTTPS on;
+        fastcgi_pass unix:/run/php/php8.5-fpm.sock;
+    }
+    # No generic PHP handler, public filesystem fallback or directory listing.
     location / { return 404; }
 }

@@ -3,10 +3,10 @@
 ## 1. 安装
 
 1. 将源码或部署压缩包解压至 `/srv/mtx`。
-2. 使用 PHP 8.3+ 最新维护补丁，启用 zip、sodium、mbstring、dom、libxml。
+2. 使用 PHP 8.3+ 最新维护补丁，启用 zip、sodium、openssl、mbstring、dom、libxml。
 3. 源码部署先执行 Composer 安装；部署压缩包已有 vendor。
-4. 在服务器终端执行 `php /srv/mtx/bin/setup.php --url https://你的域名`，交互输入管理密码。域名部署在根路径，暂不支持 URL 子目录。
-5. 设置 Nginx Web 根目录为 `/srv/mtx/public`，配置 PHP-FPM 和 HTTPS；参考同目录 nginx.conf.example。
+4. 在服务器终端执行 `php /srv/mtx/bin/setup.php --url https://你的域名`，交互输入管理密码。setup 自动生成随机入口目录，请保存输出地址；主页保持 404。已绑定安装器部署时，使用配套私有配置，不要重新生成密钥。
+5. 设置 Nginx Web 根目录为 `/srv/mtx/public`，配置 PHP-FPM 和 HTTPS；将同目录 nginx.conf.example 的 RANDOM_ENTRY 替换成配置中的入口（去掉前导 /）。
 6. 只让 PHP-FPM 用户读私有配置、写 storage；代码目录保持只读。目录权限按实际运行用户设置，避免使用全员可写权限。
 
 setup 不覆盖已有配置或状态，也不会在网页暴露安装入口。
@@ -53,3 +53,7 @@ unset MTX_PASSWORD
 后台校验通过不等于真机兼容性测试通过；发布确认由管理员在实际测试后完成。最低安装器版本由实际构建决定。
 
 切换当前发布、下架或停用游戏后，旧票据在下载请求开始时也会再次检查状态；已经开始流式发送的请求可能继续完成。服务器没有删除手机已下载文件的功能。
+
+## 6. 配套远程版安装器
+
+详见 [CDN、目录路由与客户端](../docs/cdn-and-installer.md)。旧服务升级前停站备份，运行 `php bin/upgrade.php` 为历史记录补齐 Manifest 摘要和原生签名公钥配置。代码更新保留私有配置与所有包；配套生产私有包只用于新站首次部署，不覆盖已运行站点的 storage。

@@ -51,7 +51,7 @@ final class Packages
             return ['bundle_id' => $expected, 'display_name' => self::label($info['CFBundleDisplayName'] ?? $info['CFBundleName'] ?? $expected, 160), 'display_version' => $version, 'bundle_version' => $build, 'min_ios' => $minimum];
         } finally { $zip->close(); }
     }
-    public static function prepared(string $path, array $release): void
+    public static function prepared(string $path, array $release): string
     {
         $h = fopen($path, 'rb');
         if (!$h) throw new Problem(422, 'TAR 读取失败。');
@@ -93,6 +93,7 @@ final class Packages
         foreach (['Main','MTXMenuIcons.ttf'] as $name) if (($hashes[$name] ?? null) !== $files[$name]) throw new Problem(422, '准备产物内部摘要校验失败。');
         $overrides = $manifest['InfoOverrides'] ?? null;
         if (!is_array($overrides) || array_diff(array_keys($overrides), ['NSAppTransportSecurity','CADisableMinimumFrameDurationOnPhone','UIRequiresFullScreen','UISupportedInterfaceOrientations','UISupportedInterfaceOrientations~ipad','UIStatusBarHidden','UIViewControllerBasedStatusBarAppearance','UIAppFonts'])) throw new Problem(422, '准备清单配置项尚未适配。');
+        return $files['Manifest.plist'];
     }
     private static function octal(string $raw): int
     {

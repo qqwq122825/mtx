@@ -1,6 +1,6 @@
 # 固定游戏更新接口 v1（已实现）
 
-服务端：纯 PHP + 目录/JSON，无数据库。每个安装器只绑定一个 app_key。
+服务端：纯 PHP + 目录/JSON，无数据库。每个安装器只绑定一个 app_key。下文 `/api`、`/admin` 均相对于配置的随机 mount_path；实际请求为 `/<随机入口>/api/...`，根路径无接口。
 
 ## 固定版本接口
 
@@ -22,11 +22,12 @@
 {
   "key_id": "mtx-release-1",
   "payload_base64": "BASE64_OF_ORIGINAL_UTF8_JSON",
-  "signature_base64": "BASE64_OF_ED25519_SIGNATURE"
+  "signature_base64": "BASE64_OF_ED25519_SIGNATURE",
+  "native_signature_base64": "BASE64_OF_DER_ECDSA_P256_SHA256_SIGNATURE"
 }
 ```
 
-这些占位值不是可验证签名。公钥在后台「查看安装器公钥配置」中获取，构建时固定到客户端。算法固定为 Ed25519，先验签原始 payload 字节，再解析 JSON，不重新序列化后验签。
+这些占位值不是可验证签名。公钥在后台「查看安装器公钥配置」中获取，构建时固定到客户端。Ed25519 字段保留；原生安装器及助手验证 P-256/SHA-256 的 native_signature_base64（DER X9.62），公钥为 X9.63。先验签原始 payload 字节，再解析 JSON，不重新序列化后验签。
 
 payload：schema_version=1、app_key、原请求 nonce、issued_at、expires_at、status、message、release。
 
@@ -39,9 +40,9 @@ payload：schema_version=1、app_key、原请求 nonce、issued_at、expires_at�
 - up_to_date：已安装序号等于当前发布，附 release。
 - update_available：已安装序号低于当前发布，附 release。
 
-release 字段：release_id、sequence、display_version、bundle_version、bundle_id、profile_id、artifact_format、artifact_id（64 位 SHA-256，与 artifact_sha256 相同）、artifact_bytes、artifact_sha256、source_sha256、min_installer_version、min_ios、max_ios、changelog、published_at。
+release 字段：release_id、sequence、display_version、bundle_version、bundle_id、profile_id、artifact_format、artifact_id（64 位 SHA-256，与 artifact_sha256 相同）、artifact_bytes、artifact_sha256、source_sha256、source_bytes、manifest_sha256（prepared 格式的 Manifest.plist 原始字节摘要）、min_installer_version、min_ios、max_ios、changelog、published_at。
 
-响应有效期 10 分钟，Cache-Control=no-store。客户端必须核对 nonce、有效时间、固定 app_key/Bundle ID/profile/允许格式、大小和摘要；本地维护每个 app 的最高已验证 sequence 防止旧响应被接纳。服务端只提供签名，客户端这些校验尚待接入。
+响应有效期 10 分钟，Cache-Control=no-store。客户端必须核对 nonce、有效时间、固定 app_key/Bundle ID/profile/允许格式、大小和摘要；本地维护每个 app 的最高已验证 sequence 防止旧响应被接纳。0.8.0 原生安装器已接入签名、nonce、时间和游戏契约校验；UserDefaults 已观察序号不是抵抗容器删除的硬件防回滚。
 
 ## 下载凭证
 
@@ -51,7 +52,7 @@ release 字段：release_id、sequence、display_version、bundle_version、bund
 {"app_key":"mtx-dfm-cn","release_id":"RELEASE_ID","artifact_id":"SHA256"}
 ```
 
-返回 app_key、release_id、artifact_id、url、expires_at。默认 15 分钟有效。只给启用游戏的当前已发布版本发票据，验证产物绑定；旧版本、草稿、下架版本没有新票据。
+返回 app_key、release_id、artifact_id、url、expires_at。默认 15 分钟有效。只给启用游戏的当前已发布版本发票据，artifact_id 接受该发布的 source_sha256（原始 TIPA）或 artifact_sha256（安装资源 TAR），验证产物绑定；旧版本、草稿、下架版本没有新票据。
 
 第一版分发是公开的：任何知道固定 app 的客户端可查询已发布版本和申请票据；管理员身份只控制上传/发布，不代表购买/卡密权限。
 

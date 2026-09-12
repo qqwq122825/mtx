@@ -39,6 +39,8 @@ class Client:
             body = urllib.parse.urlencode(fields).encode()
             headers['Content-Type'] = 'application/x-www-form-urlencoded'
         if path.startswith(self.base): path = path[len(self.base):]
+        prefix = urllib.parse.urlparse(self.base).path
+        if prefix and path.startswith(prefix+'/'): path = path[len(prefix):]
         req = urllib.request.Request(self.base + path, data=body, headers=headers, method=method)
         try: response = self.opener.open(req, timeout=30)
         except urllib.error.HTTPError as exc: response = exc
@@ -76,11 +78,13 @@ def prepared(source, bundle='com.mtx.scmtxdfm', bad=False):
 with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
     tmp = Path(tmp)
     with socket.socket() as sock: sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
-    base = f'http://127.0.0.1:{port}'
+    origin = f'http://127.0.0.1:{port}'
+    mount = '/r-fixture-private-0123456789'
+    base = origin + mount
     config = tmp/'config.php'; storage = tmp/'storage'
-    setup = subprocess.run([PHP, str(ROOT/'bin/setup.php'), '--url', base, '--local-http', '--password-stdin', '--config', str(config), '--storage', str(storage)], input=(PASSWORD+'\n').encode(), capture_output=True)
+    setup = subprocess.run([PHP, str(ROOT/'bin/setup.php'), '--url', origin, '--mount', mount, '--local-http', '--password-stdin', '--config', str(config), '--storage', str(storage)], input=(PASSWORD+'\n').encode(), capture_output=True)
     check(setup.returncode == 0, 'setup without database: ' + setup.stderr.decode())
-    again = subprocess.run([PHP, str(ROOT/'bin/setup.php'), '--url', base, '--local-http', '--password-stdin', '--config', str(config), '--storage', str(storage)], input=(PASSWORD+'\n').encode(), capture_output=True)
+    again = subprocess.run([PHP, str(ROOT/'bin/setup.php'), '--url', origin, '--mount', mount, '--local-http', '--password-stdin', '--config', str(config), '--storage', str(storage)], input=(PASSWORD+'\n').encode(), capture_output=True)
     check(again.returncode != 0, 'setup never overwrites configuration')
     state = lambda: json.loads((storage/'state.json').read_text())
     env = os.environ | {'MTX_CONFIG': str(config), 'PHP_CLI_SERVER_WORKERS': '4'}
@@ -88,14 +92,19 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
     proc = subprocess.Popen([PHP,'-d','upload_max_filesize=256M','-d','post_max_size=260M','-d','memory_limit=256M','-S',f'127.0.0.1:{port}','-t',str(ROOT/'public'),str(ROOT/'public/router.php')],cwd=ROOT,env=env,stdout=log,stderr=log,start_new_session=True)
     try:
         client = Client(base)
+        public_client = Client(origin)
         for _ in range(80):
             try: client.request('/admin/login.php'); break
             except (urllib.error.URLError, ConnectionError): time.sleep(.1)
         else: raise AssertionError('PHP server did not start')
+        for hidden in ['/', '/admin/', '/admin/login.php', '/api/update.php', '/assets/app.css', '/index.php']:
+            check(public_client.request(hidden)[0] == 404, 'unmounted route hidden: ' + hidden)
         status, data, headers = client.request('/admin/')
-        check(status == 303 and headers.get('Location') == '/admin/login.php', 'admin requires password login')
+        check(status == 303 and headers.get('Location') == mount + '/admin/login.php', 'admin requires password login')
         status, data, headers = client.request('/admin/login.php')
         check(status == 200 and b'password' in data, 'login page renders')
+        check((mount+'/admin/login.php').encode() in data and (mount+'/assets/app.css').encode() in data, 'prefixed form and asset URLs')
+        check(all(c.path == mount+'/admin' for c in client.cookies), 'session cookie scoped to private admin')
         check('frame-ancestors' in headers.get('Content-Security-Policy',''), 'CSP supplied')
         cookies = str(headers.get('Set-Cookie', ''))
         check(any(c.has_nonstandard_attr('HttpOnly') for c in client.cookies), 'session cookie HttpOnly')
@@ -104,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         status, _, _ = client.request('/admin/login.php', fields={'csrf':client.csrf(),'password':'wrong'})
         check(status == 401, 'incorrect password rejected')
         status, _, headers = client.request('/admin/login.php', fields={'csrf':client.csrf(),'password':PASSWORD})
-        check(status == 303 and headers.get('Location') == '/admin/', 'correct password logs in')
+        check(status == 303 and headers.get('Location') == mount + '/admin/', 'correct password logs in')
         token = client.csrf()
         status, data, _ = client.request('/admin/')
         check(status == 200 and '满天星三角洲国服'.encode() in data and '尚未发布'.encode() in data, 'dashboard empty state')
@@ -157,6 +166,8 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         verify_code = '$c=require $argv[1];$e=json_decode(stream_get_contents(STDIN),true);echo sodium_crypto_sign_verify_detached(base64_decode($e["signature_base64"]),base64_decode($e["payload_base64"]),base64_decode($c["sign_public"]))?"VALID":"INVALID";'
         def verify(e): return subprocess.check_output([PHP,'-r',verify_code,str(config)],input=json.dumps(e).encode()).decode()
         check(verify(envelope) == 'VALID','Ed25519 signature verifies')
+        native_code='$c=require $argv[1];$e=json_decode(stream_get_contents(STDIN),true);$k=openssl_pkey_get_private($c["native_sign_secret"]);$p=openssl_pkey_get_details($k)["key"];echo openssl_verify(base64_decode($e["payload_base64"]),base64_decode($e["native_signature_base64"]),$p,OPENSSL_ALGO_SHA256);'
+        check(subprocess.check_output([PHP,'-r',native_code,str(config)],input=json.dumps(envelope).encode())==b'1','PHP native P-256 signature verifies')
         tampered = envelope | {'payload_base64':base64.b64encode(b'tampered').decode()}
         check(verify(tampered) == 'INVALID','tampered manifest signature fails')
         check(update(installed_sequence=0)[0]['status'] == 'update_available','update decision')
@@ -169,6 +180,13 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         sha1 = hashlib.sha256(artifact1).hexdigest()
         def ticket(rid=r1, sha=sha1, key='mtx-dfm-cn'):
             return client.request('/api/download-ticket.php',body=json.dumps({'app_key':key,'release_id':rid,'artifact_id':sha}).encode(),headers={'Content-Type':'application/json'})
+        check(payload['release']['source_bytes']==len(source1), 'signed source length included')
+        check(len(payload['release']['manifest_sha256'])==64, 'signed prepared manifest digest included')
+        code, source_ticket, _ = ticket(sha=hashlib.sha256(source1).hexdigest())
+        check(code==200, 'TIPA source ticket issued')
+        source_url=json.loads(source_ticket)['url']
+        source_status, source_raw, source_hdr=client.request(source_url)
+        check(source_status==200 and source_raw==source1 and '.tipa' in source_hdr['Content-Disposition'], 'source download is actual original TIPA')
         code, data, _ = ticket()
         check(code == 200,'download ticket issued')
         download_url = json.loads(data)['url']
@@ -201,6 +219,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
             codes=list(pool.map(lambda c:c.action('publish',release_id=r2,revision=1,confirmed=1)[0],clients))
         check(codes==[303,303] and state()['releases'][r2]['sequence']==2 and state()['apps']['mtx-dfm-cn']['next_sequence']==3,'concurrent publication atomic and idempotent')
         check(update(installed_sequence=1)[0]['status']=='update_available','same display version new sequence updates')
+        check(client.request(source_url)[0] == 404, 'old source ticket invalidated')
         check(client.request(download_url)[0] == 404,'old download ticket stops after activation changes')
         check(client.action('withdraw',release_id=r2,revision=2)[0] == 303,'withdraw current release')
         check(update()[0]['status']=='no_release','withdraw does not silently choose older release')

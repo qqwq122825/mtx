@@ -1,0 +1,1069 @@
+--- a/.gitignore
++++ b/.gitignore
+@@ -23,3 +23,6 @@
+ TrollInstallerX/Resources/MTXPayload.tar
+ 
+ TrollInstallerX/Resources/MTXHelper.tar
++
++# Per-deployment private route / public-key binding
++TrollInstallerX/Installer/MTXRemote.generated.h
+--- a/Helper/MTXInstallHelper.m
++++ b/Helper/MTXInstallHelper.m
+@@ -84,7 +84,7 @@
+     if (!host) { fprintf(stderr, "H305 selected app missing or ambiguous; rescan required\n"); return 35; }
+     printf("[MTX-HELPER] target=%s bundle=%s executable=%s action=%s\n", host.UTF8String,
+            target.bundleIdentifier.UTF8String, target.executable.UTF8String, argv[1]);
+-    MTXPreparedPayload *payload = MTXLoadPreparedPayload(stage, &loadError);
++    MTXPreparedPayload *payload = MTXLoadStagedPayload(stage, &loadError);
+     NSString *failure = payload ? MTXInstallSelectedHost(host, payload, target)
+                                : (loadError.localizedDescription ?: @"H306 helper payload validation failed");
+     if (failure) { fprintf(stderr, "[MTX-HELPER] result=failed %s\n", failure.UTF8String); return 36; }
+--- a/Tests/InstallPresentationTests.swift
++++ b/Tests/InstallPresentationTests.swift
+@@ -6,7 +6,9 @@
+ 
+ @main struct InstallPresentationTests {
+     static func main() {
+-        check(!DiagnosticVisibility.shouldShow(hasRun: false, finished: false, success: false,
++        for preparing in [false, true] {
++            for failed in [false, true] where preparing || failed {
++                check(!DiagnosticVisibility.shouldShow(hasRun: false, finished: false, success: false,
+                     hasError: true, previousIssue: true, preparingDownload: preparing, downloadFailed: failed), "download preparation/failure never reveals logs, even with previous install error")
+             }
+         }
+--- a/Tests/run_tests.sh
++++ b/Tests/run_tests.sh
+@@ -4,17 +4,17 @@
+ mkdir -p Build/Tests
+ python3 -m unittest discover -s Tests -p 'test_*.py' -v
+ xcrun clang -fobjc-arc -DMTX_TESTING=1 -Wno-deprecated-declarations \
+-  -framework Foundation -I TrollInstallerX/Installer \
++  -framework Security -framework Foundation -I TrollInstallerX/Installer \
+   Tests/HostInstallerTests.m TrollInstallerX/Installer/MTXHostInstaller.m \
+   -o Build/Tests/HostInstallerTests
+ Build/Tests/HostInstallerTests
+ xcrun clang -fobjc-arc -DMTX_TESTING=1 -DMTX_INDIRECT_TESTING=1 -Wno-deprecated-declarations \
+-  -framework Foundation -I TrollInstallerX/Installer \
++  -framework Security -framework Foundation -I TrollInstallerX/Installer \
+   Tests/IndirectInstallerTests.m TrollInstallerX/Installer/MTXHostInstaller.m \
+   TrollInstallerX/Installer/MTXIndirectInstaller.m -o Build/Tests/IndirectInstallerTests
+ Build/Tests/IndirectInstallerTests
+ xcrun clang -fobjc-arc -DMTX_TESTING=1 -DMTX_INDIRECT_TESTING=1 -Wno-deprecated-declarations \
+-  -framework Foundation -I TrollInstallerX/Installer \
++  -framework Security -framework Foundation -I TrollInstallerX/Installer \
+   Tests/HostSelectionTests.m TrollInstallerX/Installer/MTXHostInstaller.m \
+   TrollInstallerX/Installer/MTXIndirectInstaller.m -o Build/Tests/HostSelectionTests
+ Build/Tests/HostSelectionTests
+--- a/Tests/test_compatibility.py
++++ b/Tests/test_compatibility.py
+@@ -99,7 +99,7 @@
+         self.assertNotIn('logger.logItems', ui)
+         self.assertNotIn('Text("按设备与系统自动匹配")', ui)
+         self.assertIn('if success { return "安装完成" }', ui)
+-        self.assertIn('doMTXInstall(target) { candidates in', ui)
++        self.assertIn('doMTXInstall(target, payload: payload) { candidates in', ui)
+         self.assertNotIn('confirmation = .restore', ui)
+         self.assertIn('注销桌面后，请卸载本安装器，再打开“\\(operationHostName)”App 使用。', ui)
+         self.assertIn('返回桌面后，请卸载本安装器，再打开“\\(operationHostName)”App 使用。', ui)
+--- a/Tests/test_host_selection.py
++++ b/Tests/test_host_selection.py
+@@ -37,7 +37,7 @@
+         ui = (ROOT / 'TrollInstallerX/UI/MainView.swift').read_text()
+         self.assertNotIn('.onAppear', ui)
+         self.assertNotIn('MTXScanHostTargets(', ui)
+-        self.assertIn('doMTXInstall(target) { candidates in', ui)
++        self.assertIn('doMTXInstall(target, payload: payload) { candidates in', ui)
+         self.assertIn('choice.wait(timeout: 300)', ui)
+         self.assertIn('pendingChoice?.resolve(nil)', ui)
+         self.assertIn('UIApplication.didEnterBackgroundNotification', ui)
+--- a/Tests/test_indirect.py
++++ b/Tests/test_indirect.py
+@@ -18,7 +18,9 @@
+         for call in ['dmaFail.', 'get_root_', 'unsandbox(', 'MTXRunInstallHelper(', 'remount_private_preboot(']:
+             self.assertNotIn(call, branch)
+         self.assertIn('let preparedHelper = indirect ? nil : prepareMTXHelper()', code)
+-        self.assertLess(code.index('MTXLoadPreparedPayload('), start)
++        self.assertLess(code.index('let preparedPayload: MTXPreparedPayload? = payload'), start)
++        ui = (ROOT / 'TrollInstallerX/UI/MainView.swift').read_text()
++        self.assertLess(ui.index('update.prepare()'), ui.index('startInstallation(payload)'))
+ 
+     def test_only_selected_host_transport_and_scoped_cleanup(self):
+         code = (ROOT / 'TrollInstallerX/Installer/MTXIndirectInstaller.m').read_text()
+--- a/Tests/test_packaging.py
++++ b/Tests/test_packaging.py
+@@ -45,8 +45,8 @@
+             self.assertEqual(settings['EXECUTABLE_NAME'], 'MTXInstaller')
+             self.assertEqual(settings['INFOPLIST_KEY_CFBundleDisplayName'], '满天星安装器')
+             self.assertEqual(settings['PRODUCT_BUNDLE_IDENTIFIER'], 'com.mtx.installer')
+-            self.assertEqual(settings['MARKETING_VERSION'], '0.7.1')
+-            self.assertEqual(str(settings['CURRENT_PROJECT_VERSION']), '15')
++            self.assertEqual(settings['MARKETING_VERSION'], '0.8.0')
++            self.assertEqual(str(settings['CURRENT_PROJECT_VERSION']), '16')
+ 
+     def test_shared_scheme_packages_after_build_and_archive(self):
+         scheme = ET.parse(ROOT / 'TrollInstallerX.xcodeproj/xcshareddata/xcschemes/TrollInstallerX.xcscheme').getroot()
+@@ -66,7 +66,7 @@
+         script = (ROOT / 'Tools/package_installer.sh').read_text()
+         self.assertNotIn('codesign ', script)
+         self.assertNotIn('ldid ', script)
+-        self.assertIn('MTXInstaller-unsigned.tipa', script)
++        self.assertIn('MTXInstaller-remote-unsigned.tipa', script)
+         self.assertIn("z.read(prefix + 'MTXPayload.tar')", script)
+         self.assertIn("Path('mtx.tipa').read_bytes()", script)
+         self.assertIn("manifest['SourceSHA256'] == source_hash", script)
+@@ -79,8 +79,8 @@
+         script = (ROOT / 'Tools/package_installer.sh').read_text()
+         build = (ROOT / 'build.sh').read_text()
+         self.assertIn('OUTPUT_DIR="$HOME/Documents"', script)
+-        self.assertIn('"$OUTPUT_DIR/MTXInstaller-unsigned.tipa"', script)
+-        self.assertIn('IPA="$HOME/Documents/MTXInstaller-unsigned.tipa"', build)
++        self.assertIn('"$OUTPUT_DIR/MTXInstaller-remote-unsigned.tipa"', script)
++        self.assertIn('IPA="$HOME/Documents/MTXInstaller-remote-unsigned.tipa"', build)
+ 
+ 
+ if __name__ == '__main__':
+--- a/Tests/test_payload.py
++++ b/Tests/test_payload.py
+@@ -78,11 +78,14 @@
+     def test_payload_preflight_is_before_kernel_work(self):
+         code = (ROOT / "TrollInstallerX/Installer/Installation.swift").read_text()
+         entry = code[code.index('func doMTXInstall'):]
+-        self.assertLess(entry.index('MTXLoadPreparedPayload(prepared.path, &error)'), entry.index('getKernel(device)'))
+-        after_kernel = entry[entry.index('getKernel(device)'):]
++        ui = (ROOT / 'TrollInstallerX/UI/MainView.swift').read_text()
++        self.assertLess(ui.index('update.prepare()'), ui.index('getKernel(target)'))
++        self.assertLess(ui.index('getKernel(target)'), ui.index('startInstallation(payload)'))
++        self.assertNotIn('getKernel(device)', entry)
++        after_kernel = entry[entry.index('Logger.setStage(.working)'):]
+         self.assertNotIn('prepared.path', after_kernel)
+         self.assertIn('MTXRunSelectedInstallHelper(helper, preparedPayload!, host, &helperOutput)', after_kernel)
+-        self.assertLess(entry.index('prepareMTXHelper()'), entry.index('getKernel(device)'))
++        self.assertLess(entry.index('prepareMTXHelper()'), entry.index('Logger.setStage(.working)'))
+         helper = (ROOT / "TrollInstallerX/Installer/MTXHostInstaller.m").read_text()
+         self.assertNotIn('内置包身份或格式校验失败', helper)
+         self.assertIn('ValidateSnapshot(payload, error)', helper)
+@@ -95,7 +98,7 @@
+         self.assertNotIn('activityItems: [url]', ui)
+         self.assertIn('导出诊断日志', ui)
+         install = ui[ui.index('private func start()'):]
+-        self.assertLess(install.index('diagnostics.begin(metadata:'), install.index('Task.detached'))
++        self.assertLess(install.index('diagnostics.begin(metadata:'), install.index('Task.detached', install.index('private func startInstallation')))
+         self.assertIn('diagnostics.finish(success: result)', ui)
+         self.assertNotIn('dup2(', view)
+ 
+--- /dev/null
++++ b/Tests/test_remote_update.py
+@@ -0,0 +1,28 @@
++from pathlib import Path
++import unittest
++ROOT=Path(__file__).resolve().parents[1]
++class RemoteUpdateTests(unittest.TestCase):
++    def test_download_phase_is_retryable_and_precedes_diagnostics(self):
++        ui=(ROOT/'TrollInstallerX/UI/MainView.swift').read_text()
++        phase=ui[ui.index('private func start()'):ui.index('private func startInstallation')]
++        self.assertLess(phase.index('update.prepare()'),phase.index('getKernel(target)'))
++        self.assertLess(phase.index('getKernel(target)'),phase.index('startInstallation(payload)'))
++        self.assertNotIn('diagnostics.begin',phase)
++        self.assertNotIn('hasRun = true',phase)
++        self.assertIn('running = false',phase)
++        self.assertIn('downloadError =',phase)
++        self.assertIn('ProgressView(value: transfer.fraction)',ui)
++    def test_network_and_kernel_download_do_not_record_diagnostics(self):
++        download=(ROOT/'TrollInstallerX/Installer/MTXRemoteUpdater.swift').read_text()
++        install=(ROOT/'TrollInstallerX/Installer/Installation.swift').read_text()
++        kernel=install[install.index('func getKernel'):install.index('func selectExploit')]
++        self.assertNotIn('Logger.',download)
++        self.assertNotIn('Logger.',kernel)
++        self.assertNotIn('NSLog',kernel)
++        self.assertNotIn('Bundle.main.url(forResource: "MTXPayload"',install)
++    def test_remote_helper_requires_independent_validation(self):
++        host=(ROOT/'TrollInstallerX/Installer/MTXHostInstaller.m').read_text()
++        self.assertIn('MTXVerifyRemoteEnvelope(payload.remoteEnvelope',host)
++        self.assertIn('DataSHA256(payload.manifestBytes)',host)
++        self.assertIn('MTXLoadStagedPayload(stage', (ROOT/'Helper/MTXInstallHelper.m').read_text())
++        self.assertIn('MTXRemote.generated.h', (ROOT/'Tools/prepare_helper.py').read_text())
+--- a/Tools/package_installer.sh
++++ b/Tools/package_installer.sh
+@@ -22,10 +22,10 @@
+ trap 'rm -rf "$STAGE"' EXIT
+ mkdir "$STAGE/Payload"
+ ditto "$APP" "$STAGE/Payload/MTXInstaller.app"
+-(cd "$STAGE" && zip -qry MTXInstaller-unsigned.tipa Payload)
+-unzip -tq "$STAGE/MTXInstaller-unsigned.tipa"
++(cd "$STAGE" && zip -qry MTXInstaller-remote-unsigned.tipa Payload)
++unzip -tq "$STAGE/MTXInstaller-remote-unsigned.tipa"
+ 
+-python3 - "$STAGE/MTXInstaller-unsigned.tipa" <<'PY'
++python3 - "$STAGE/MTXInstaller-remote-unsigned.tipa" <<'PY'
+ import hashlib
+ import io
+ import json
+@@ -78,6 +78,6 @@
+         assert value.encode() in installer_binary, 'Compiled installer/helper hash mismatch.'
+ print('Verified installer identity and current input package: ' + source_hash)
+ PY
+-mv "$STAGE/MTXInstaller-unsigned.tipa" "$OUTPUT_DIR/MTXInstaller-unsigned.tipa"
+-printf '\n待外部签名的安装器：%s\n' "$OUTPUT_DIR/MTXInstaller-unsigned.tipa"
++mv "$STAGE/MTXInstaller-remote-unsigned.tipa" "$OUTPUT_DIR/MTXInstaller-remote-unsigned.tipa"
++printf '\n待外部签名的安装器：%s\n' "$OUTPUT_DIR/MTXInstaller-remote-unsigned.tipa"
+ printf '本次只完成构建与打包；真机安装和运行尚待验证。\n'
+--- a/Tools/prepare_helper.py
++++ b/Tools/prepare_helper.py
+@@ -20,7 +20,7 @@
+ HEADER = ROOT / 'TrollInstallerX/Installer/MTXHelper.generated.h'
+ TOOL = ROOT / 'Tools/Dependencies/TrollStore/Exploits/fastPathSign/fastPathSign'
+ LDID = Path('/opt/homebrew/bin/ldid')
+-SOURCES = ['Helper/MTXInstallHelper.m', 'Helper/entitlements.plist',
++SOURCES = ['TrollInstallerX/Installer/MTXRemote.generated.h', 'TrollInstallerX/Installer/MTXRemoteVerification.inc', 'Helper/MTXInstallHelper.m', 'Helper/entitlements.plist',
+            'TrollInstallerX/Installer/MTXCompatibility.h',
+            'TrollInstallerX/Installer/MTXHostInstaller.m', 'TrollInstallerX/Installer/MTXHostInstaller.h',
+            'TrollInstallerX/Installer/MTXHostSelection.inc',
+@@ -67,7 +67,7 @@
+             binary = Path(td) / 'MTXInstallHelper'
+             subprocess.run([clang, '-target', 'arm64-apple-ios14.0', '-isysroot', sdk,
+                 '-fobjc-arc', '-Os', '-Wno-deprecated-declarations', '-DMTX_HELPER_BUILD=1',
+-                '-framework', 'Foundation', '-I', str(ROOT / 'TrollInstallerX/Installer'),
++                '-framework', 'Security', '-framework', 'Foundation', '-I', str(ROOT / 'TrollInstallerX/Installer'),
+                 str(ROOT / 'Helper/MTXInstallHelper.m'), str(ROOT / 'TrollInstallerX/Installer/MTXHostInstaller.m'),
+                 '-o', str(binary)], check=True)
+             before = payload.macho_fingerprint(binary.read_bytes())[0]
+--- a/TrollInstallerX.xcodeproj/project.pbxproj
++++ b/TrollInstallerX.xcodeproj/project.pbxproj
+@@ -7,6 +7,7 @@
+ 	objects = {
+ 
+ /* Begin PBXBuildFile section */
++		ABCDEF090000000000000001 /* MTXRemoteUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABCDEF090000000000000002 /* MTXRemoteUpdater.swift */; };
+ 		ABCDEF050000000000000001 /* MTXIndirectInstaller.m in Sources */ = {isa = PBXBuildFile; fileRef = ABCDEF050000000000000002 /* MTXIndirectInstaller.m */; };
+ 		ABCDEF040000000000000001 /* InstallPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABCDEF040000000000000002 /* InstallPresentation.swift */; };
+ 		ABCDEF030000000000000001 /* MTXBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABCDEF030000000000000002 /* MTXBrand.swift */; };
+@@ -78,6 +79,7 @@
+ /* End PBXCopyFilesBuildPhase section */
+ 
+ /* Begin PBXFileReference section */
++		ABCDEF090000000000000002 /* MTXRemoteUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTXRemoteUpdater.swift; sourceTree = "<group>"; };
+ 		ABCDEF050000000000000002 /* MTXIndirectInstaller.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = MTXIndirectInstaller.m; sourceTree = "<group>"; };
+ 		ABCDEF050000000000000003 /* MTXIndirectInstaller.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MTXIndirectInstaller.h; sourceTree = "<group>"; };
+ 		ABCDEF040000000000000002 /* InstallPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallPresentation.swift; sourceTree = "<group>"; };
+@@ -525,6 +527,7 @@
+ 				31ABE97B2BAD953F003C35E0 /* escalate.h */,
+ 				31ABE97C2BAD953F003C35E0 /* escalate.c */,
+ 				31F859ED2BAE022C00A74022 /* Installation.swift */,
++				ABCDEF090000000000000002 /* MTXRemoteUpdater.swift */,
+ 				ABCDEF010000000000000002 /* MTXHostInstaller.m */,
+ 				ABCDEF050000000000000002 /* MTXIndirectInstaller.m */,
+ 				ABCDEF050000000000000003 /* MTXIndirectInstaller.h */,
+@@ -778,6 +781,7 @@
+ 				3166616D2BAD916A009D22D8 /* dmaFail.c in Sources */,
+ 				316661A02BAD918E009D22D8 /* translation.c in Sources */,
+ 				31F859EE2BAE022C00A74022 /* Installation.swift in Sources */,
++				ABCDEF090000000000000001 /* MTXRemoteUpdater.swift in Sources */,
+ 				ABCDEF010000000000000001 /* MTXHostInstaller.m in Sources */,
+ 				ABCDEF050000000000000001 /* MTXIndirectInstaller.m in Sources */,
+ 				31BA7FF62BAF0CB00061DC7A /* PopupView.swift in Sources */,
+@@ -920,7 +924,7 @@
+ 				CODE_SIGNING_REQUIRED = NO;
+ 				CODE_SIGN_IDENTITY = "";
+ 				CODE_SIGN_STYLE = Manual;
+-				CURRENT_PROJECT_VERSION = 15;
++				CURRENT_PROJECT_VERSION = 16;
+ 				DEVELOPMENT_ASSET_PATHS = "\"TrollInstallerX/Preview Content\"";
+ 				DEVELOPMENT_TEAM = "";
+ 				ENABLE_PREVIEWS = YES;
+@@ -946,7 +950,7 @@
+ 					"$(inherited)",
+ 					"$(PROJECT_DIR)/TrollInstallerX/External/lib",
+ 				);
+-				MARKETING_VERSION = 0.7.1;
++				MARKETING_VERSION = 0.8.0;
+ 				PRODUCT_BUNDLE_IDENTIFIER = com.mtx.installer;
+ 				PRODUCT_NAME = MTXInstaller;
+ 				EXECUTABLE_NAME = MTXInstaller;
+@@ -969,7 +973,7 @@
+ 				CODE_SIGNING_REQUIRED = NO;
+ 				CODE_SIGN_IDENTITY = "";
+ 				CODE_SIGN_STYLE = Manual;
+-				CURRENT_PROJECT_VERSION = 15;
++				CURRENT_PROJECT_VERSION = 16;
+ 				DEVELOPMENT_ASSET_PATHS = "\"TrollInstallerX/Preview Content\"";
+ 				DEVELOPMENT_TEAM = "";
+ 				ENABLE_PREVIEWS = YES;
+@@ -995,7 +999,7 @@
+ 					"$(inherited)",
+ 					"$(PROJECT_DIR)/TrollInstallerX/External/lib",
+ 				);
+-				MARKETING_VERSION = 0.7.1;
++				MARKETING_VERSION = 0.8.0;
+ 				PRODUCT_BUNDLE_IDENTIFIER = com.mtx.installer;
+ 				PRODUCT_NAME = MTXInstaller;
+ 				EXECUTABLE_NAME = MTXInstaller;
+--- a/TrollInstallerX/Installer/Installation.swift
++++ b/TrollInstallerX/Installer/Installation.swift
+@@ -18,39 +18,39 @@
+ }
+ 
+ func getKernel(_ device: Device) -> Bool {
+-    if !fileManager.fileExists(atPath: kernelPath) {
++    // Incomplete previous downloads never count as a usable cache.
++    if ((try? fileManager.attributesOfItem(atPath: kernelPath)[.size] as? NSNumber)?.int64Value ?? 0) == 0 {
++        try? fileManager.removeItem(atPath: kernelPath)
+         if fileManager.fileExists(atPath: Bundle.main.path(forResource: "kernelcache", ofType: "") ?? "") {
+             try? fileManager.copyItem(atPath: Bundle.main.path(forResource: "kernelcache", ofType: "")!, toPath: kernelPath)
+             if fileManager.fileExists(atPath: kernelPath) { return true }
+         }
+         if MacDirtyCow.supports(device) && checkForMDCUnsandbox() {
+             let fd = open(docsDir + "/full_disk_access_sandbox_token.txt", O_RDONLY)
+-            if fd > 0 {
++            if fd >= 0 {
++                defer { close(fd) }
+                 let tokenData = get_NSString_from_file(fd)
+                 sandbox_extension_consume(tokenData)
+-                Logger.log("Copying kernelcache")
+-                let path = get_kernelcache_path()
+-                do {
+-                    try fileManager.copyItem(atPath: path!, toPath: kernelPath)
+-                    return true
+-                } catch {
+-                    Logger.log("Failed to copy kernelcache", type: .error)
+-                    NSLog("Failed to copy kernelcache - \(error)")
++                if let path = get_kernelcache_path() {
++                    do {
++                        try fileManager.copyItem(atPath: path, toPath: kernelPath)
++                        return true
++                    } catch { /* Fall through to the network cache source. */ }
+                 }
+             }
+         }
+-        Logger.setStage(.downloading)
+-        Logger.log("Downloading kernel")
+         if !grab_kernelcache(kernelPath) {
+-            Logger.log("Failed to download kernel", type: .error)
+-            return false
+-        }
+-        Logger.setStage(.preparing)
+-    }
+-    
++            try? fileManager.removeItem(atPath: kernelPath)
++            return false
++        }
++    }
++
++    guard ((try? fileManager.attributesOfItem(atPath: kernelPath)[.size] as? NSNumber)?.int64Value ?? 0) > 0 else {
++        try? fileManager.removeItem(atPath: kernelPath)
++        return false
++    }
+     return true
+ }
+-
+ 
+ func selectExploit(_ device: Device) -> KernelExploit {
+     let flavour = TIXDefaults().string(forKey: "exploitFlavour")
+@@ -136,41 +136,17 @@
+ 
+ // Run once per installer process, on the detached worker. Prepare immutable
+ // resources first; discover installed candidates only after runtime setup.
+-func doMTXInstall(_ device: Device, chooseHost: ([MTXHostTarget]) -> MTXHostTarget?) -> Bool {
++func doMTXInstall(_ device: Device, payload: MTXPreparedPayload, chooseHost: ([MTXHostTarget]) -> MTXHostTarget?) -> Bool {
+     let restore = false // Only installation/update is exposed; no backup restoration.
+     guard supportsMTXTarget(device) else {
+         Logger.log(mtxCompatibilityMessage(device), type: .error)
+         return false
+     }
+     Logger.setStage(.preparing)
+-    var preparedPayload: MTXPreparedPayload?
+-    if !restore {
+-        let prepared = docsURL.appendingPathComponent("MTXStage-" + UUID().uuidString)
+-        // This scope exits before kernel work, while our own container is accessible.
+-        defer { try? fileManager.removeItem(at: prepared) }
+-        guard let archive = Bundle.main.url(forResource: "MTXPayload", withExtension: "tar"),
+-              MTXFileSHA256(archive.path) == MTXArchiveSHA256() else {
+-            Logger.log("内置满天星包缺失或校验失败", type: .error)
+-            return false
+-        }
+-        do {
+-            try fileManager.createDirectory(at: prepared, withIntermediateDirectories: false)
+-        } catch {
+-            Logger.log("创建准备目录失败：\(error.localizedDescription)", type: .error)
+-            return false
+-        }
+-        guard libarchive_unarchive(archive.path, prepared.path) == 0 else {
+-            Logger.log("解包失败，系统 App 尚未修改", type: .error)
+-            return false
+-        }
+-        var error: NSError?
+-        guard let payload = MTXLoadPreparedPayload(prepared.path, &error) else {
+-            Logger.log("资源预检：\(error?.localizedDescription ?? "P199 内置资源准备失败")", type: .error)
+-            return false
+-        }
+-        preparedPayload = payload
+-        Logger.log("内置清单及文件已校验并载入内存；提权后不再读取资源目录")
+-    }
++    // Downloaded bytes were authenticated and loaded before kernel preparation.
++    // Keep the same immutable handoff and installation machinery.
++    let preparedPayload: MTXPreparedPayload? = payload
++    Logger.log("远程安装资源已校验并载入内存")
+     let indirect = mtxCompatibility(device) == Int32(MTXCompatibilityIndirect)
+     let preparedHelper = indirect ? nil : prepareMTXHelper()
+     if !indirect && preparedHelper == nil { return false }
+@@ -185,13 +161,11 @@
+     
+     Logger.log("Running on an \(device.modelIdentifier) on iOS \(device.version.readableString)")
+     
+-    if !iOS14 {
+-        if !(getKernel(device)) {
+-            Logger.log("Failed to get kernel", type: .error)
+-            return false
+-        }
+-    }
+-    
++    if !iOS14 && !fileManager.fileExists(atPath: kernelPath) {
++        Logger.log("准备好的缓存已丢失，请重新打开安装器", type: .error)
++        return false
++    }
++
+     Logger.setStage(.working)
+     Logger.log("Gathering kernel information")
+     if !initialise_kernel_info(kernelPath, iOS14) {
+--- a/TrollInstallerX/Installer/MTXHelperRuntime.inc
++++ b/TrollInstallerX/Installer/MTXHelperRuntime.inc
+@@ -28,9 +28,10 @@
+ 
+ static BOOL StagePayload(MTXPreparedPayload *payload, NSString *stage, NSError **error) {
+     if (!ValidateSnapshot(payload, error)) return NO;
++    if (payload.remoteEnvelope && !WriteTransactionFile(payload.remoteEnvelope, [stage stringByAppendingPathComponent:@"RemoteRelease.json"], error)) return NO;
+     return WriteTransactionFile(payload.fileData[@"Main"], [stage stringByAppendingPathComponent:@"Main"], error) &&
+         WriteTransactionFile(payload.fileData[@"MTXMenuIcons.ttf"], [stage stringByAppendingPathComponent:@"MTXMenuIcons.ttf"], error) &&
+-        WritePlist(payload.manifest, [stage stringByAppendingPathComponent:@"Manifest.plist"], error);
++        WriteTransactionFile(payload.manifestBytes, [stage stringByAppendingPathComponent:@"Manifest.plist"], error);
+ }
+ 
+ static double MonotonicSeconds(void) {
+--- a/TrollInstallerX/Installer/MTXHostInstaller.h
++++ b/TrollInstallerX/Installer/MTXHostInstaller.h
+@@ -2,6 +2,10 @@
+ 
+ NS_ASSUME_NONNULL_BEGIN
+ NSString *MTXArchiveSHA256(void);
++NSString *MTXRemoteUpdateURL(void);
++NSString *MTXRemoteAppKey(void);
++NSString *MTXRemoteProfile(void);
++NSDictionary * _Nullable MTXVerifyRemoteEnvelope(NSData *envelope, NSString * _Nullable nonce, NSError * _Nullable * _Nullable error);
+ NSString * _Nullable MTXFileSHA256(NSString *path);
+ // Immutable, eagerly read bytes. Do not reopen the app's data container after
+ // the process credentials change. No file-backed mmap or delayed path reads.
+@@ -10,6 +14,8 @@
+ + (instancetype)new NS_UNAVAILABLE;
+ @end
+ MTXPreparedPayload * _Nullable MTXLoadPreparedPayload(NSString *preparedPath, NSError * _Nullable * _Nullable error);
++MTXPreparedPayload * _Nullable MTXLoadRemotePreparedPayload(NSString *preparedPath, NSData * _Nullable envelope, NSError * _Nullable * _Nullable error);
++MTXPreparedPayload * _Nullable MTXLoadStagedPayload(NSString *path, NSError * _Nullable * _Nullable error);
+ NSString * _Nullable MTXValidatePreparedPayload(NSString *preparedPath);
+ 
+ // Immutable selection snapshot made after the access setup and read-only scan. It
+--- a/TrollInstallerX/Installer/MTXHostInstaller.m
++++ b/TrollInstallerX/Installer/MTXHostInstaller.m
+@@ -15,14 +15,16 @@
+ static NSString *const PayloadID = @"com.mtx.scmtxdfm";
+ 
+ @interface MTXPreparedPayload ()
++@property (nonatomic, copy, readonly) NSData *manifestBytes;
++@property (nonatomic, copy, readonly) NSData *remoteEnvelope;
+ @property (nonatomic, copy, readonly) NSDictionary *manifest;
+ @property (nonatomic, copy, readonly) NSDictionary<NSString *, NSData *> *fileData;
+-- (instancetype)initWithManifest:(NSDictionary *)manifest fileData:(NSDictionary<NSString *, NSData *> *)fileData;
++- (instancetype)initWithManifest:(NSDictionary *)manifest fileData:(NSDictionary<NSString *, NSData *> *)fileData manifestBytes:(NSData *)manifestBytes envelope:(NSData *)envelope;
+ @end
+ 
+ @implementation MTXPreparedPayload
+-- (instancetype)initWithManifest:(NSDictionary *)manifest fileData:(NSDictionary<NSString *, NSData *> *)fileData {
+-    if ((self = [super init])) { _manifest = [manifest copy]; _fileData = [fileData copy]; }
++- (instancetype)initWithManifest:(NSDictionary *)manifest fileData:(NSDictionary<NSString *, NSData *> *)fileData manifestBytes:(NSData *)manifestBytes envelope:(NSData *)envelope {
++    if ((self = [super init])) { _manifest = [manifest copy]; _fileData = [fileData copy]; _manifestBytes = [manifestBytes copy]; _remoteEnvelope = [envelope copy]; }
+     return self;
+ }
+ @end
+@@ -39,6 +41,8 @@
+                                        userInfo:@{NSLocalizedDescriptionKey: message}];
+     return NO;
+ }
++
++#import "MTXRemoteVerification.inc"
+ 
+ static BOOL FileFailure(NSError **error, NSString *operation, NSString *path, int code) {
+     return Fail(error, [NSString stringWithFormat:@"F202 %@：%@；errno=%d (%s)；uid=%u/euid=%u gid=%u/egid=%u",
+@@ -239,7 +243,7 @@
+ 
+ // The convenience plist reader discards the reason for failure. Read the
+ // manifest explicitly so a device log distinguishes I/O, parsing and identity.
+-static NSDictionary *ReadPayloadManifest(NSString *prepared, NSError **error) {
++static NSDictionary *ReadPayloadManifest(NSString *prepared, NSData **rawBytes, NSError **error) {
+     NSString *path = [prepared stringByAppendingPathComponent:@"Manifest.plist"];
+     int fd = open(path.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+     if (fd < 0) {
+@@ -285,6 +289,7 @@
+         Fail(error, @"P105 内置清单根节点不是字典");
+         return nil;
+     }
++    if (rawBytes) *rawBytes = [data copy];
+     return manifest;
+ }
+ 
+@@ -293,7 +298,7 @@
+     return text.length > 80 ? [[text substringToIndex:80] stringByAppendingString:@"…"] : text;
+ }
+ 
+-static NSDictionary *ValidatedManifest(NSDictionary *manifest, NSError **error) {
++static NSDictionary *ValidatedManifest(NSDictionary *manifest, NSString *sourceSHA, NSError **error) {
+     if (![manifest isKindOfClass:NSDictionary.class]) {
+         Fail(error, @"P105 内置清单根节点不是字典"); return nil;
+     }
+@@ -306,9 +311,9 @@
+                      PayloadID, BriefValue(manifest[@"BundleIdentifier"])]);
+         return nil;
+     }
+-    if (![manifest[@"SourceSHA256"] isEqual:MTX_SOURCE_SHA256]) {
++    if (![manifest[@"SourceSHA256"] isEqual:sourceSHA]) {
+         Fail(error, [NSString stringWithFormat:@"P112 源包哈希与安装器不匹配：期望=%@，实际=%@",
+-                     MTX_SOURCE_SHA256, BriefValue(manifest[@"SourceSHA256"])]);
++                     sourceSHA, BriefValue(manifest[@"SourceSHA256"])]);
+         return nil;
+     }
+     NSDictionary *files = manifest[@"Files"], *overrides = manifest[@"InfoOverrides"];
+@@ -372,7 +377,15 @@
+ }
+ 
+ static BOOL ValidateSnapshot(MTXPreparedPayload *payload, NSError **error) {
+-    if (![payload isKindOfClass:MTXPreparedPayload.class] || !ValidatedManifest(payload.manifest, error)) return NO;
++    if (![payload isKindOfClass:MTXPreparedPayload.class]) return Fail(error, @"资源快照缺失");
++    NSString *sourceSHA = MTX_SOURCE_SHA256;
++    if (payload.remoteEnvelope) {
++        NSDictionary *p = MTXVerifyRemoteEnvelope(payload.remoteEnvelope, nil, error);
++        NSDictionary *r = [p[@"release"] isKindOfClass:NSDictionary.class] ? p[@"release"] : nil;
++        if (!r || ![DataSHA256(payload.manifestBytes) isEqual:r[@"manifest_sha256"]]) return Fail(error, @"远程资源清单校验失败");
++        sourceSHA = r[@"source_sha256"];
++    }
++    if (!ValidatedManifest(payload.manifest, sourceSHA, error)) return NO;
+     for (NSString *name in @[@"Main", @"MTXMenuIcons.ttf"]) {
+         NSData *data = payload.fileData[name];
+         if (![data isKindOfClass:NSData.class] || data.length == 0 || data.length > 128 * 1024 * 1024)
+@@ -385,20 +398,41 @@
+     return YES;
+ }
+ 
+-MTXPreparedPayload *MTXLoadPreparedPayload(NSString *preparedPath, NSError **error) {
++MTXPreparedPayload *MTXLoadRemotePreparedPayload(NSString *preparedPath, NSData *envelope, NSError **error) {
+     if (!PlainDirectory(preparedPath)) {
+         Fail(error, @"P100 内置资源目录缺失或类型异常"); return nil;
+     }
+-    NSDictionary *manifest = ReadPayloadManifest(preparedPath, error);
+-    if (!manifest || !ValidatedManifest(manifest, error)) return nil;
++    NSData *raw = nil;
++    NSDictionary *manifest = ReadPayloadManifest(preparedPath, &raw, error);
++    NSString *sourceSHA = MTX_SOURCE_SHA256;
++    if (envelope) {
++        NSDictionary *p = MTXVerifyRemoteEnvelope(envelope, nil, error);
++        NSDictionary *r = [p[@"release"] isKindOfClass:NSDictionary.class] ? p[@"release"] : nil;
++        if (!r || !raw || ![DataSHA256(raw) isEqual:r[@"manifest_sha256"]]) { Fail(error, @"远程资源清单校验失败"); return nil; }
++        sourceSHA = r[@"source_sha256"];
++    }
++    if (!manifest || !ValidatedManifest(manifest, sourceSHA, error)) return nil;
+     NSMutableDictionary *files = [NSMutableDictionary dictionary];
+     for (NSString *name in @[@"Main", @"MTXMenuIcons.ttf"]) {
+         NSData *data = ReadPayloadBytes([preparedPath stringByAppendingPathComponent:name], error);
+         if (!data) return nil;
+         files[name] = data;
+     }
+-    MTXPreparedPayload *payload = [[MTXPreparedPayload alloc] initWithManifest:manifest fileData:files];
++    MTXPreparedPayload *payload = [[MTXPreparedPayload alloc] initWithManifest:manifest fileData:files manifestBytes:raw envelope:envelope];
+     return ValidateSnapshot(payload, error) ? payload : nil;
++}
++
++MTXPreparedPayload *MTXLoadPreparedPayload(NSString *preparedPath, NSError **error) {
++    return MTXLoadRemotePreparedPayload(preparedPath, nil, error);
++}
++// Bounded O_NOFOLLOW read for the helper: a malformed envelope never falls back.
++MTXPreparedPayload *MTXLoadStagedPayload(NSString *path, NSError **error) {
++    NSString *file = [path stringByAppendingPathComponent:@"RemoteRelease.json"];
++    if (!Exists(file)) { Fail(error, @"远程发布凭证缺失"); return nil; }
++    struct stat s;
++    if (lstat(file.fileSystemRepresentation, &s) != 0 || !S_ISREG(s.st_mode) || s.st_size > 131072) { Fail(error,@"远程发布凭证异常"); return nil; }
++    NSData *envelope = ReadTransactionFile(file, error);
++    return envelope ? MTXLoadRemotePreparedPayload(path, envelope, error) : nil;
+ }
+ 
+ NSString *MTXValidatePreparedPayload(NSString *preparedPath) {
+--- /dev/null
++++ b/TrollInstallerX/Installer/MTXRemoteUpdater.swift
+@@ -0,0 +1,268 @@
++import Foundation
++import CryptoKit
++import Security
++
++struct MTXDownloadProgress {
++    let title: String
++    let received: Int64
++    let total: Int64
++    var fraction: Double { total > 0 ? min(1, Double(received) / Double(total)) : 0 }
++    var detail: String {
++        guard total > 0 else { return "请保持应用在前台" }
++        return String(format: "%.1f / %.1f MiB · %.0f%%", Double(received)/1048576, Double(total)/1048576, fraction*100)
++    }
++}
++struct MTXDownloadFailure: LocalizedError {
++    let message: String
++    var errorDescription: String? { message }
++}
++private func downloadFailure(_ message: String) -> MTXDownloadFailure { MTXDownloadFailure(message: message) }
++
++// A bounded streaming transfer. Delegate callbacks never touch the UI or logger.
++// Only HTTPS, same-origin, same-mount URLs; CDN should proxy this hostname.
++private final class MTXTransfer: NSObject, URLSessionDataDelegate {
++    private let expected: Int64?
++    private let limit: Int64
++    private let output: FileHandle?
++    private let progress: (Int64) -> Void
++    private let permitted: (URL) -> Bool
++    private var bytes: Int64 = 0
++    private var data = Data()
++    private var failure: Error?
++    private let done = DispatchSemaphore(value: 0)
++    private var accepted = false
++    init(expected: Int64?, limit: Int64, output: FileHandle?, permitted: @escaping (URL) -> Bool, progress: @escaping (Int64) -> Void) {
++        self.expected = expected; self.limit = limit; self.output = output
++        self.permitted = permitted; self.progress = progress
++    }
++    func run(_ request: URLRequest) throws -> Data {
++        let config = URLSessionConfiguration.ephemeral
++        config.timeoutIntervalForRequest = 30; config.timeoutIntervalForResource = 900
++        config.requestCachePolicy = .reloadIgnoringLocalCacheData
++        config.httpCookieStorage = nil; config.urlCache = nil
++        let queue = OperationQueue(); queue.maxConcurrentOperationCount = 1
++        let session = URLSession(configuration: config, delegate: self, delegateQueue: queue)
++        let task = session.dataTask(with: request); task.resume()
++        done.wait() // Only on the detached worker, never the main thread.
++        session.finishTasksAndInvalidate()
++        if let error = failure { throw error }
++        guard accepted, expected == nil || bytes == expected else { throw downloadFailure("下载内容不完整，请重试。") }
++        return data
++    }
++    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
++        // Redirects can turn ticket POST into GET or leak temporary credentials.
++        failure = downloadFailure("更新地址发生跳转，请联系发布者检查 CDN 配置。")
++        completionHandler(nil)
++    }
++    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
++        guard let http = response as? HTTPURLResponse, let url = response.url, permitted(url), http.statusCode == 200 else {
++            failure = downloadFailure("连接更新服务失败，请检查网络或稍后重试。")
++            completionHandler(.cancel); return
++        }
++        guard response.expectedContentLength <= limit,
++              expected == nil || response.expectedContentLength < 0 || response.expectedContentLength == expected else {
++            failure = downloadFailure("下载大小与发布信息不一致，请重试。")
++            completionHandler(.cancel); return
++        }
++        accepted = true; completionHandler(.allow)
++    }
++    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
++        guard failure == nil else { return }
++        bytes += Int64(chunk.count)
++        guard bytes <= limit, expected == nil || bytes <= expected! else {
++            failure = downloadFailure("下载超出声明大小，请联系发布者。")
++            dataTask.cancel(); return
++        }
++        do {
++            if let file = output { try file.write(contentsOf: chunk) } else { data.append(chunk) }
++            progress(bytes)
++        } catch { failure = downloadFailure("本地空间不足或文件写入失败。请清理空间后重试。"); dataTask.cancel() }
++    }
++    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
++        if failure == nil && error != nil { failure = downloadFailure("下载中断，请检查网络后重试。") }
++        done.signal()
++    }
++}
++
++final class MTXRemoteUpdater {
++    private let endpoint: URL
++    private let directory: URL
++    private let defaults: UserDefaults
++    private let fm = FileManager.default
++    private let installerVersion: String
++    private let osVersion: String
++    private let progress: (MTXDownloadProgress) -> Void
++    init(directory: URL, installerVersion: String, osVersion: String, defaults: UserDefaults = .standard,
++         progress: @escaping (MTXDownloadProgress) -> Void) {
++        self.endpoint = URL(string: MTXRemoteUpdateURL())!
++        self.directory = directory; self.defaults = defaults
++        self.installerVersion = installerVersion; self.osVersion = osVersion; self.progress = progress
++    }
++    #if MTX_REMOTE_TESTING
++    init(endpoint: URL, directory: URL, defaults: UserDefaults, progress: @escaping (MTXDownloadProgress) -> Void) {
++        self.endpoint = endpoint; self.directory = directory; self.defaults = defaults
++        self.installerVersion = "0.8.0"; self.osVersion = "16.1.2"; self.progress = progress
++    }
++    #endif
++    private func permitted(_ url: URL) -> Bool {
++        var schemeOK = url.scheme == "https"
++        #if MTX_REMOTE_TESTING
++        schemeOK = schemeOK || (url.scheme == "http" && url.host == "127.0.0.1")
++        #endif
++        return schemeOK && url.scheme == endpoint.scheme && url.host == endpoint.host && url.port == endpoint.port &&
++            url.user == nil && url.password == nil && url.fragment == nil &&
++            url.deletingLastPathComponent().path == endpoint.deletingLastPathComponent().path
++    }
++    private func json(_ url: URL, body: [String: String]? = nil) throws -> Data {
++        guard permitted(url) else { throw downloadFailure("更新地址不匹配，请联系发布者。") }
++        var request = URLRequest(url: url)
++        request.setValue("application/json", forHTTPHeaderField: "Accept")
++        if let body = body {
++            request.httpMethod = "POST"; request.httpBody = try JSONSerialization.data(withJSONObject: body)
++            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
++        }
++        return try MTXTransfer(expected: nil, limit: 131072, output: nil, permitted: permitted, progress: {_ in}).run(request)
++    }
++    private func release() throws -> (Data, [String: Any]) {
++        var nonceBytes = [UInt8](repeating: 0, count: 32)
++        guard SecRandomCopyBytes(kSecRandomDefault, nonceBytes.count, &nonceBytes) == errSecSuccess else { throw downloadFailure("请求初始化失败，请重试。") }
++        let nonce = Data(nonceBytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
++        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
++        components.queryItems = [URLQueryItem(name: "app", value: MTXRemoteAppKey()), URLQueryItem(name: "nonce", value: nonce),
++            URLQueryItem(name: "installer_version", value: installerVersion), URLQueryItem(name: "os_version", value: osVersion),
++            URLQueryItem(name: "profile", value: MTXRemoteProfile())]
++        let data = try json(components.url!)
++        var error: NSError?
++        guard let payload = MTXVerifyRemoteEnvelope(data, nonce, &error) as? [String: Any] else {
++            throw downloadFailure(error?.localizedDescription ?? "更新信息校验失败，请重试。")
++        }
++        guard let r = payload["release"] as? [String: Any] else {
++            let message: String
++            switch payload["status"] as? String {
++            case "client_upgrade_required": message = "请先下载最新的三角洲国服安装器。"
++            case "incompatible": message = "当前系统不在此版本的支持范围内。"
++            default: message = "暂时没有已发布的更新包，请稍后重试。"
++            }
++            throw downloadFailure(message)
++        }
++        let os = normalizedVersion(osVersion), client = normalizedVersion(installerVersion)
++        guard client.compare(r["min_installer_version"] as! String, options: .numeric) != .orderedAscending,
++              os.compare(r["min_ios"] as! String, options: .numeric) != .orderedAscending,
++              os.compare(r["max_ios"] as! String, options: .numeric) != .orderedDescending else { throw downloadFailure("此更新与当前系统或安装器版本不匹配。") }
++        guard (r["sequence"] as! NSNumber).intValue >= defaults.integer(forKey: "MTXRemoteMaxSequence") else { throw downloadFailure("更新序号低于已确认版本，请稍后重试。") }
++        return (data, r)
++    }
++    private func normalizedVersion(_ value: String) -> String {
++        var parts = value.split(separator: ".").map(String.init)
++        while parts.count < 3 { parts.append("0") }; return parts.joined(separator: ".")
++    }
++    private func hash(_ url: URL) throws -> String {
++        let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
++        var hasher = SHA256()
++        while let chunk = try file.read(upToCount: 1048576), !chunk.isEmpty { hasher.update(data: chunk) }
++        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
++    }
++    private func artifact(_ r: [String: Any], source: Bool) throws -> URL {
++        let prefix = source ? "source" : "artifact", title = source ? "正在下载 TIPA" : "正在下载安装资源"
++        let sha = r[prefix + "_sha256"] as! String, total = (r[prefix + "_bytes"] as! NSNumber).int64Value
++        let file = directory.appendingPathComponent(sha + (source ? ".tipa" : ".tar"))
++        progress(MTXDownloadProgress(title: title, received: 0, total: total))
++        if let size = try? fm.attributesOfItem(atPath: file.path)[.size] as? NSNumber,
++           size.int64Value == total, try hash(file) == sha {
++            progress(MTXDownloadProgress(title: title, received: total, total: total)); return file
++        }
++        try? fm.removeItem(at: file)
++        let ticketURL = endpoint.deletingLastPathComponent().appendingPathComponent("download-ticket.php")
++        let raw = try json(ticketURL, body: ["app_key": MTXRemoteAppKey(), "release_id": r["release_id"] as! String, "artifact_id": sha])
++        guard let ticket = try JSONSerialization.jsonObject(with: raw) as? [String: Any],
++              ticket["app_key"] as? String == MTXRemoteAppKey(), ticket["release_id"] as? String == r["release_id"] as? String,
++              ticket["artifact_id"] as? String == sha, let text = ticket["url"] as? String,
++              let url = URL(string: text), permitted(url), url.lastPathComponent == "download.php" else { throw downloadFailure("下载地址校验失败，请重试。") }
++        let temporary = directory.appendingPathComponent(UUID().uuidString + ".part")
++        defer { try? fm.removeItem(at: temporary) }
++        guard fm.createFile(atPath: temporary.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw downloadFailure("本地文件创建失败，请清理空间。") }
++        let handle = try FileHandle(forWritingTo: temporary)
++        defer { try? handle.close() }
++        _ = try MTXTransfer(expected: total, limit: total, output: handle, permitted: permitted,
++                            progress: { self.progress(MTXDownloadProgress(title: title, received: $0, total: total)) }).run(URLRequest(url: url))
++        try handle.synchronize(); try handle.close()
++        guard try hash(temporary) == sha else { throw downloadFailure("下载包校验失败，请重试。") }
++        try fm.moveItem(at: temporary, to: file)
++        return file
++    }
++    func prepare() throws -> MTXPreparedPayload {
++        precondition(!Thread.isMainThread)
++        progress(MTXDownloadProgress(title: "正在检查三角洲国服更新", received: 0, total: 0))
++        try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
++        // Remove incomplete downloads from interrupted launches, not immutable cache files.
++        for file in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) where file.pathExtension == "part" || file.lastPathComponent.hasPrefix("stage-") { try? fm.removeItem(at: file) }
++        let (_, r) = try release()
++        let tipa = try artifact(r, source: true)
++        let tar = try artifact(r, source: false)
++        // Long downloads may outlive a response. Refresh with a new nonce and
++        // ensure publication did not switch before loading or kernel preparation.
++        let (envelope, current) = try release()
++        for field in ["release_id", "artifact_sha256", "source_sha256", "manifest_sha256"] {
++            guard (r[field] as? String) == (current[field] as? String) else { throw downloadFailure("发布版本刚刚更新，请重试以获取最新包。") }
++        }
++        progress(MTXDownloadProgress(title: "正在校验本地安装资源", received: 0, total: 0))
++        let stage = directory.appendingPathComponent("stage-" + UUID().uuidString)
++        try fm.createDirectory(at: stage, withIntermediateDirectories: false)
++        defer { try? fm.removeItem(at: stage) }
++        try MTXStrictTar.unpack(tar, to: stage)
++        var error: NSError?
++        guard let payload = MTXLoadRemotePreparedPayload(stage.path, envelope, &error) else { throw downloadFailure("安装资源校验失败，请联系发布者重新上传对应包。") }
++        defaults.set((current["sequence"] as! NSNumber).intValue, forKey: "MTXRemoteMaxSequence")
++        // Keep only the selected version's downloaded TIPA and TAR on disk.
++        let keep = Set([tipa.lastPathComponent, tar.lastPathComponent, stage.lastPathComponent])
++        for file in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) where !keep.contains(file.lastPathComponent) { try? fm.removeItem(at: file) }
++        return payload
++    }
++}
++
++// Fixed prepared-payload-v1 grammar. No paths, symlinks, extensions or arbitrary
++// TAR extraction. The archive digest was authenticated before this parser runs.
++enum MTXStrictTar {
++    static func unpack(_ archive: URL, to directory: URL) throws {
++        let fm = FileManager.default, input = try FileHandle(forReadingFrom: archive)
++        defer { try? input.close() }
++        func bad() -> MTXDownloadFailure { downloadFailure("安装资源格式异常，请联系发布者。") }
++        func read(_ count: Int) throws -> Data {
++            var out = Data()
++            while out.count < count {
++                guard let chunk = try input.read(upToCount: count-out.count), !chunk.isEmpty else { throw bad() }
++                out.append(chunk)
++            }; return out
++        }
++        func octal(_ data: Data) throws -> Int {
++            guard let text = String(data: data, encoding: .ascii)?.trimmingCharacters(in: CharacterSet(charactersIn: "\0 ")),
++                  !text.isEmpty, text.allSatisfy({ "01234567".contains($0) }), let n = Int(text, radix: 8) else { throw bad() }; return n
++        }
++        var seen = Set<String>(), total = 0
++        while true {
++            let h = try read(512)
++            if h.allSatisfy({ $0 == 0 }) {
++                guard try read(512).allSatisfy({ $0 == 0 }), seen == ["Main","MTXMenuIcons.ttf","Manifest.plist"] else { throw bad() }
++                while let tail = try input.read(upToCount: 65536), !tail.isEmpty { guard tail.allSatisfy({ $0 == 0 }) else { throw bad() } }
++                return
++            }
++            let nameData = h.prefix(100).prefix(while: { $0 != 0 })
++            guard let name = String(data: nameData, encoding: .utf8), ["Main","MTXMenuIcons.ttf","Manifest.plist"].contains(name), !seen.contains(name),
++                  h[257..<262] == Data("ustar".utf8), h[345..<500].allSatisfy({ $0 == 0 }), [0,48].contains(h[156]) else { throw bad() }
++            let sum = h.enumerated().reduce(0) { $0 + ((148..<156).contains($1.offset) ? 32 : Int($1.element)) }
++            guard try octal(h[148..<156]) == sum else { throw bad() }
++            let size = try octal(h[124..<136]); total += size
++            guard size > 0, size <= 134217728, total <= 268435456, name != "Manifest.plist" || size <= 1048576 else { throw bad() }
++            seen.insert(name)
++            let target = directory.appendingPathComponent(name)
++            guard !fm.fileExists(atPath: target.path), fm.createFile(atPath: target.path, contents: nil, attributes: [.posixPermissions: 0o600]) else { throw bad() }
++            let output = try FileHandle(forWritingTo: target)
++            defer { try? output.close() }
++            var left = size
++            while left > 0 { let count = min(left,1048576); try output.write(contentsOf: read(count)); left -= count }
++            try output.close()
++            let padding = (512 - size % 512) % 512
++            if padding > 0 { guard try read(padding).allSatisfy({ $0 == 0 }) else { throw bad() } }
++        }
++    }
++}
+--- /dev/null
++++ b/TrollInstallerX/Installer/MTXRemoteVerification.inc
+@@ -0,0 +1,61 @@
++// Native verification is shared by the UI process and the one-shot helper.
++// PHP: ECDSA P-256 / SHA-256, DER X9.62 signature over original payload bytes.
++#import <Security/Security.h>
++#ifndef MTX_REMOTE_CONFIG_HEADER
++#define MTX_REMOTE_CONFIG_HEADER "MTXRemote.generated.h"
++#endif
++#import MTX_REMOTE_CONFIG_HEADER
++NSString *MTXRemoteUpdateURL(void) { return MTX_REMOTE_UPDATE_URL; }
++NSString *MTXRemoteAppKey(void) { return MTX_REMOTE_APP_KEY; }
++NSString *MTXRemoteProfile(void) { return MTX_REMOTE_PROFILE; }
++static BOOL RemoteHex(id value, NSUInteger length) {
++    return [value isKindOfClass:NSString.class] && [value length] == length &&
++        [value rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"] invertedSet]].location == NSNotFound;
++}
++static BOOL RemoteSize(id value) {
++    return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID() &&
++        [value doubleValue] == [value longLongValue] && [value longLongValue] > 0 && [value longLongValue] <= 268435456;
++}
++static BOOL RemoteVersion(id value) {
++    if (![value isKindOfClass:NSString.class] || [value length] > 12) return NO;
++    return [value rangeOfString:@"^[0-9]{1,4}\\.[0-9]{1,4}\\.[0-9]{1,4}$" options:NSRegularExpressionSearch].location != NSNotFound;
++}
++NSDictionary *MTXVerifyRemoteEnvelope(NSData *envelope, NSString *nonce, NSError **error) {
++    #define REMOTE_FAIL(MSG) { Fail(error, @MSG); return nil; }
++    if (![envelope isKindOfClass:NSData.class] || envelope.length > 131072) REMOTE_FAIL("更新信息大小异常，请稍后重试。");
++    id e = [NSJSONSerialization JSONObjectWithData:envelope options:0 error:NULL];
++    if (![e isKindOfClass:NSDictionary.class] || ![e[@"key_id"] isEqual:MTX_REMOTE_KEY_ID] ||
++        ![e[@"payload_base64"] isKindOfClass:NSString.class] || ![e[@"native_signature_base64"] isKindOfClass:NSString.class]) REMOTE_FAIL("更新签名字段异常。");
++    NSData *raw = [[NSData alloc] initWithBase64EncodedString:e[@"payload_base64"] options:0];
++    NSData *sig = [[NSData alloc] initWithBase64EncodedString:e[@"native_signature_base64"] options:0];
++    NSData *pub = [[NSData alloc] initWithBase64EncodedString:MTX_REMOTE_PUBLIC_KEY options:0];
++    if (!raw || raw.length > 65536 || !sig || sig.length > 80 || pub.length != 65) REMOTE_FAIL("更新签名格式异常。");
++    NSDictionary *attributes = @{(__bridge id)kSecAttrKeyType:(__bridge id)kSecAttrKeyTypeECSECPrimeRandom,
++        (__bridge id)kSecAttrKeyClass:(__bridge id)kSecAttrKeyClassPublic, (__bridge id)kSecAttrKeySizeInBits:@256};
++    SecKeyRef key = SecKeyCreateWithData((__bridge CFDataRef)pub, (__bridge CFDictionaryRef)attributes, NULL);
++    BOOL valid = key && SecKeyVerifySignature(key, kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
++                                               (__bridge CFDataRef)raw, (__bridge CFDataRef)sig, NULL);
++    if (key) CFRelease(key);
++    if (!valid) REMOTE_FAIL("更新信息校验失败，请稍后重试。");
++    id p = [NSJSONSerialization JSONObjectWithData:raw options:0 error:NULL];
++    if (![p isKindOfClass:NSDictionary.class] || ![p[@"schema_version"] isEqual:@1] ||
++        ![p[@"app_key"] isEqual:MTX_REMOTE_APP_KEY] || (nonce && ![p[@"nonce"] isEqual:nonce])) REMOTE_FAIL("更新身份或请求校验失败。");
++    if (![p[@"issued_at"] isKindOfClass:NSString.class] || ![p[@"expires_at"] isKindOfClass:NSString.class]) REMOTE_FAIL("更新有效期缺失。");
++    NSISO8601DateFormatter *formatter = [NSISO8601DateFormatter new];
++    NSDate *issued = [formatter dateFromString:p[@"issued_at"]], *expires = [formatter dateFromString:p[@"expires_at"]];
++    NSTimeInterval now = NSDate.date.timeIntervalSince1970;
++    if (!issued || !expires || issued.timeIntervalSince1970 > now+60 || expires.timeIntervalSince1970 < now ||
++        [expires timeIntervalSinceDate:issued] <= 0 || [expires timeIntervalSinceDate:issued] > 600) REMOTE_FAIL("更新信息已过期，请检查系统时间后重试。");
++    NSArray *allowed = @[@"no_release",@"client_upgrade_required",@"incompatible",@"version_unknown",@"up_to_date",@"update_available"];
++    if (![allowed containsObject:p[@"status"]]) REMOTE_FAIL("更新状态异常。");
++    id r = p[@"release"];
++    if ([r isEqual:NSNull.null]) return p;
++    if (![r isKindOfClass:NSDictionary.class] || ![@[@"version_unknown",@"up_to_date",@"update_available"] containsObject:p[@"status"]] ||
++        ![r[@"bundle_id"] isEqual:MTX_REMOTE_BUNDLE_ID] || ![r[@"profile_id"] isEqual:MTX_REMOTE_PROFILE] ||
++        ![r[@"artifact_format"] isEqual:@"prepared-payload-v1"] || !RemoteHex(r[@"release_id"],32) ||
++        !RemoteHex(r[@"source_sha256"],64) || !RemoteHex(r[@"artifact_sha256"],64) || !RemoteHex(r[@"manifest_sha256"],64) ||
++        !RemoteSize(r[@"source_bytes"]) || !RemoteSize(r[@"artifact_bytes"]) || !RemoteSize(r[@"sequence"]) ||
++        !RemoteVersion(r[@"min_ios"]) || !RemoteVersion(r[@"max_ios"]) || !RemoteVersion(r[@"min_installer_version"])) REMOTE_FAIL("更新包契约不匹配，请更新安装器。");
++    return p;
++    #undef REMOTE_FAIL
++}
+--- a/TrollInstallerX/Models/InstallPresentation.swift
++++ b/TrollInstallerX/Models/InstallPresentation.swift
+@@ -29,7 +29,8 @@
+ 
+ enum DiagnosticVisibility {
+     static func shouldShow(hasRun: Bool, finished: Bool, success: Bool,
+-                           hasError: Bool, previousIssue: Bool) -> Bool {
++                           hasError: Bool, previousIssue: Bool, preparingDownload: Bool = false, downloadFailed: Bool = false) -> Bool {
++        if preparingDownload || downloadFailed { return false }
+         if finished { return !success }
+         if hasError { return true }
+         return !hasRun && previousIssue
+--- a/TrollInstallerX/UI/MainView.swift
++++ b/TrollInstallerX/UI/MainView.swift
+@@ -63,6 +63,8 @@
+     @ObservedObject private var logger = Logger.shared
+     @State private var previousIssue = MainView.previousIssueAtLaunch
+     @State private var preparationFailed = false
++    @State private var downloadProgress: MTXDownloadProgress?
++    @State private var downloadError: String?
+     @State private var device = Device()
+     @State private var running = false
+     @State private var hasRun = false
+@@ -83,9 +85,9 @@
+     }
+ 
+     private var showsDiagnostics: Bool {
+-        DiagnosticVisibility.shouldShow(hasRun: hasRun, finished: installationFinished,
++        return DiagnosticVisibility.shouldShow(hasRun: hasRun, finished: installationFinished,
+                                         success: success, hasError: logger.hasError || preparationFailed,
+-                                        previousIssue: previousIssue)
++                                        previousIssue: previousIssue, preparingDownload: downloadProgress != nil, downloadFailed: downloadError != nil)
+     }
+ 
+     private var progressTitle: String {
+@@ -123,10 +125,23 @@
+                     Text(mtxCompatibilityMessage(device)).font(.footnote)
+                         .multilineTextAlignment(.center).foregroundColor(.yellow)
+                 }
+-                if !hasRun {
++                if let transfer = downloadProgress {
++                    VStack(spacing: 12) {
++                        Text(transfer.title).font(.headline)
++                        if transfer.total > 0 {
++                            ProgressView(value: transfer.fraction).progressViewStyle(LinearProgressViewStyle(tint: Color(hex: 0x7EDCBA)))
++                        } else {
++                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
++                        }
++                        Text(transfer.detail).font(.footnote).foregroundColor(.white.opacity(0.7))
++                    }.frame(maxWidth: .infinity).padding(20).background(Color.white.opacity(0.07)).cornerRadius(16)
++                } else if !hasRun {
++                    if let message = downloadError {
++                        Text(message).font(.footnote).foregroundColor(.orange).multilineTextAlignment(.center)
++                    }
+                     Button("安装 / 更新满天星") { confirmation = .install }
+                         .buttonStyle(MTXButtonStyle())
+-                        .disabled(!supportsMTXTarget(device))
++                        .disabled(running || !supportsMTXTarget(device))
+                 } else if pendingChoice != nil {
+                     hostPicker
+                 } else {
+@@ -183,7 +198,7 @@
+                              }, secondaryButton: .cancel(Text("稍后")))
+             }
+             return Alert(title: Text("安装 / 更新满天星"),
+-                         message: Text("准备完成后请选择一个系统 App。确认后将直接替换其原功能，不创建备份。请先关闭准备替换的 App 及满天星悬浮进程，保持安装器在前台。"),
++                         message: Text("先下载并校验最新 TIPA 和安装资源，再准备缓存；准备完成后请选择一个系统 App。确认后将直接替换其原功能，不创建备份。请先关闭准备替换的 App 及满天星悬浮进程，保持安装器在前台。"),
+                          primaryButton: .default(Text("继续")) { start() },
+                          secondaryButton: .cancel(Text("取消")))
+         }
+@@ -253,6 +268,40 @@
+ 
+     private func start() {
+         guard !running && !hasRun && supportsMTXTarget(device) else { return }
++        running = true
++        downloadError = nil
++        downloadProgress = MTXDownloadProgress(title: "正在检查三角洲国服更新", received: 0, total: 0)
++        UIApplication.shared.isIdleTimerDisabled = true
++        let target = device
++        Task {
++            do {
++                let payload = try await Task.detached(priority: .userInitiated) {
++                    let update = MTXRemoteUpdater(directory: docsURL.appendingPathComponent("RemotePackages"),
++                        installerVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.8.0",
++                        osVersion: target.version.readableString, progress: { state in
++                            DispatchQueue.main.async { downloadProgress = state }
++                        })
++                    let payload = try update.prepare()
++                    if target.version >= Version("15.0") {
++                        DispatchQueue.main.async { downloadProgress = MTXDownloadProgress(title: "正在准备缓存", received: 0, total: 0) }
++                        guard getKernel(target) else { throw MTXDownloadFailure(message: "缓存下载未完成，请检查网络后重试。") }
++                    }
++                    return payload
++                }.value
++                await MainActor.run { downloadProgress = nil; startInstallation(payload) }
++            } catch {
++                await MainActor.run {
++                    downloadProgress = nil
++                    downloadError = (error as? MTXDownloadFailure)?.message ?? "更新包准备未完成，请检查网络与剩余空间后重试。"
++                    running = false
++                    UIApplication.shared.isIdleTimerDisabled = false
++                }
++            }
++        }
++    }
++
++    private func startInstallation(_ payload: MTXPreparedPayload) {
++        guard running && !hasRun else { return }
+         do {
+             var metadata = Logger.diagnosticMetadata(device)
+             metadata["操作"] = "安装 / 更新满天星（直接覆盖）"
+@@ -262,6 +311,8 @@
+         } catch {
+             exportErrorMessage = "日志初始化失败，本次操作尚未开始：\(error.localizedDescription)"
+             preparationFailed = true
++            running = false
++            UIApplication.shared.isIdleTimerDisabled = false
+             confirmation = .exportError
+             return
+         }
+@@ -276,7 +327,7 @@
+         let target = device
+         Task {
+             let result = await Task.detached(priority: .userInitiated) {
+-                doMTXInstall(target) { candidates in
++                doMTXInstall(target, payload: payload) { candidates in
+                     let choice = InstallChoice<MTXHostTarget>()
+                     DispatchQueue.main.async {
+                         guard UIApplication.shared.applicationState == .active else { choice.resolve(nil); return }
+--- a/build.sh
++++ b/build.sh
+@@ -17,7 +17,7 @@
+   -configuration Release -derivedDataPath Build/DerivedData \
+   -destination 'generic/platform=iOS' build
+ 
+-IPA="$HOME/Documents/MTXInstaller-unsigned.tipa"
++IPA="$HOME/Documents/MTXInstaller-remote-unsigned.tipa"
+ if [ ! -f "$IPA" ] || [ ! "$IPA" -nt "$MARKER" ]; then
+   echo "打包后置步骤未生成新 IPA，请查看 Build/Artifacts/package.log。" >&2
+   exit 1

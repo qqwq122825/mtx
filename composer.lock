@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e0af991b2a5678aaf9fb50b04697065e",
+    "content-hash": "20fae5588d946f43e997292ac1da10ef",
     "packages": [
         {
             "name": "rodneyrehm/plist",
@@ -95,7 +95,8 @@
         "php": "^8.3",
         "ext-zip": "*",
         "ext-sodium": "*",
-        "ext-mbstring": "*"
+        "ext-mbstring": "*",
+        "ext-openssl": "*"
     },
     "platform-dev": {},
     "plugin-api-version": "2.9.0"

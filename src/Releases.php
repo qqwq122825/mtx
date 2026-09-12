@@ -57,13 +57,14 @@ final class Releases
     {
         $r=self::release($this->app->store->read(),$id,$key);
         if ($r['state']!=='draft' || $r['artifact_format']!=='prepared-payload-v1') throw new Problem(409,'仅待准备版本接收 TAR 产物。');
-        Packages::prepared($file,$r);
+        $manifestSHA=Packages::prepared($file,$r);
         $artifact=$this->app->saveObject($file);
-        $this->app->store->change(function (&$s) use ($key,$id,$artifact) {
+        $this->app->store->change(function (&$s) use ($key,$id,$artifact,$manifestSHA) {
             $r=self::release($s,$id,$key);
             if ($r['state']!=='draft') throw new Problem(409,'版本状态已变化，请刷新。');
             $s['releases'][$id]['artifact_sha256']=$artifact['sha256'];
             $s['releases'][$id]['artifact_bytes']=$artifact['bytes'];
+            $s['releases'][$id]['manifest_sha256']=$manifestSHA;
             $s['releases'][$id]['state']='ready';
             Store::audit($s,'准备产物结构与摘要校验通过',$key.' / '.$id);
         });
@@ -75,8 +76,10 @@ final class Releases
             if ($r['state']==='published' && $g['current_release_id']===$id) return; // retry is idempotent
             if ($g['revision']!==$revision) throw new Problem(409,'其他操作已更新线上版本，请刷新后确认。','revision_conflict');
             if ($r['state']!=='ready' || !$g['enabled']) throw new Problem(409,'游戏已停用或版本尚未准备完成。');
-            $path=$this->app->object($r['artifact_sha256']);
-            if (!is_file($path) || filesize($path)!==$r['artifact_bytes'] || !hash_equals($r['artifact_sha256'],hash_file('sha256',$path))) throw new Problem(409,'发布文件缺失或摘要异常。');
+            foreach (['source','artifact'] as $part) {
+                $path=$this->app->object($r[$part.'_sha256']);
+                if (!is_file($path) || filesize($path)!==$r[$part.'_bytes'] || !hash_equals($r[$part.'_sha256'],hash_file('sha256',$path))) throw new Problem(409,'发布文件缺失或摘要异常。');
+            }
             $s['releases'][$id]['sequence']=$g['next_sequence'];
             $s['releases'][$id]['published_at']=gmdate('c');
             $s['releases'][$id]['state']='published';
@@ -121,7 +124,7 @@ final class Releases
     }
     public static function wire(array $r): array
     {
-        $fields=['release_id','sequence','display_version','bundle_version','bundle_id','profile_id','artifact_format','artifact_bytes','artifact_sha256','source_sha256','min_installer_version','min_ios','max_ios','changelog','published_at'];
+        $fields=['release_id','sequence','display_version','bundle_version','bundle_id','profile_id','artifact_format','artifact_bytes','artifact_sha256','source_sha256','source_bytes','manifest_sha256','min_installer_version','min_ios','max_ios','changelog','published_at'];
         return array_intersect_key($r,array_flip($fields))+['artifact_id'=>$r['artifact_sha256']];
     }
 }

@@ -6,20 +6,23 @@
 
 ## 已实现
 
+- 随机目录入口，主页与旧管理路径 404；无用户名，仅密码登录。
 - 单管理员密码登录、CSRF、8 小时会话、错误密码限流、退出登录。
 - 游戏独立配置、固定接口地址、预期 Bundle ID、启用/停用。
 - TIPA 上传进度、XML/binary plist 元数据识别、ZIP 路径/大小/CRC/身份检查。
 - 原始 TIPA 或准备产物 TAR 两种分发模式。
 - 草稿 → 准备完成 → 发布；下架、历史内容复制为新草稿、发布序号递增。
 - 文件锁 + 原子替换 JSON，重复发布幂等，陈旧页面发布冲突检查。
-- Ed25519 签名更新清单、短期下载凭证、HEAD、ETag、单范围断点续传。
+- Ed25519 + P-256 签名更新清单、短期下载凭证、HEAD、ETag、单范围断点续传。
 - 登录及发布审计，保留最近 1,000 条。
 
-**边界：这是服务端。尚未修改或重新打包原巨魔安装器，也未做其远程更新真机验证。** 默认三角洲配置读取准备产物 TAR：上传 TIPA 后还需补充匹配的 `MTXPayload.tar`。后台验证结构、输入绑定和内部摘要，不代替客户端签名/机型兼容检查。自动生成 TAR 的 Mac worker 尚未接入。
+**客户端已接入：定制版巨魔 0.8.0 / build 16，先下载 TIPA（字节进度条）→ 下载匹配的 TAR → 校验 → 准备缓存 → 安装。** 下载错误只显示重试提示，安装阶段异常才显示诊断日志。已完成本地自动测试和 iOS 构建，真机安装/线上部署尚待验证。
+
+默认三角洲配置仍需要 TIPA + 对应 `MTXPayload.tar`。PHP 校验结构与摘要，不执行上传程序，不自动生成 TAR。固定游戏客户端的具体接入、CDN 规则和密钥迁移见 [远程安装器与 CDN](docs/cdn-and-installer.md)。
 
 ## 环境
 
-- PHP 8.3–8.5（使用仍受支持分支的最新补丁），扩展 zip、sodium、mbstring、dom、libxml。
+- PHP 8.3–8.5（使用仍受支持分支的最新补丁），扩展 zip、sodium、openssl、mbstring、dom、libxml。
 - Composer 2（仅首次安装依赖时需要）。部署压缩包已包含 vendor，无需服务器再次安装依赖。
 - 本地可用 PHP 内置服务器；生产使用 HTTPS + Nginx/PHP-FPM。
 - 存储要求：本机持久文件系统，支持 flock 与同目录原子 rename。首版适合单服务器/单管理员，不使用无锁 NFS 或多实例共享目录。
@@ -34,7 +37,7 @@ php bin/setup.php --url http://127.0.0.1:8787 --local-http
 sh bin/serve.sh
 ```
 
-setup 会在终端交互读取密码，不写入 Git、不使用默认密码。后台入口：`http://127.0.0.1:8787/admin/`。
+setup 会在终端交互读取密码，不写入 Git、不使用默认密码。setup 会输出随机后台入口：`http://127.0.0.1:8787/<随机入口>/admin/`；请保存，不在主页公开。
 
 如果系统默认 PHP 过旧，用 PHP 8.3+ 的绝对路径执行 setup；serve 使用 `PHP_BINARY=/实际路径/php sh bin/serve.sh`。端口修改时需同步私有配置中的 base_url。
 
@@ -65,13 +68,13 @@ src/                         # PHP 业务代码
 4. 完成对应安装器兼容测试后勾选确认，再发布。固定接口保持不变。
 5. 下架后停止该版本下载，不自动切回旧包。历史版本可复制成新草稿，重新发布后获得更大序号。
 
-后台默认的 `0.8.0` 是远程版最低安装器版本的**可编辑建议值**，不是声称现有 `0.7.1` 已接入。构建客户端时须确定正式版本和 profile，并填入相同配置。
+本轮远程安装器版本为 `0.8.0`；后台建议最低版本与之匹配。原 `0.7.1` 是离线内置包版本。其他游戏应重新构建匹配其身份与 profile 的专用安装器。
 
 ## 接口
 
-固定入口：`/api/update.php?app=mtx-dfm-cn`，查询还需 nonce、installer_version、os_version、profile；支持可选 installed_sequence。游戏地址是路由，不是登录/购买凭证。当前已发布版本为公开分发，尚无卡密权限模块。
+固定入口：`/<随机入口>/api/update.php?app=mtx-dfm-cn`，查询还需 nonce、installer_version、os_version、profile；支持可选 installed_sequence。游戏地址是路由，不是登录/购买凭证。当前已发布版本为公开分发，尚无卡密权限模块。
 
-签名算法 Ed25519；签名覆盖 Base64 解码后的原始 UTF-8 payload 字节，客户端先验签后解析。公钥在登录后的「当前构建绑定」内查看，构建时写入客户端。下载完成仍检查清单中的 SHA-256/长度/包身份。
+签名提供 Ed25519 和 P-256，原生安装器及助手使用 P-256；签名覆盖 Base64 解码后的原始 UTF-8 payload 字节，客户端先验签后解析。公钥在登录后的「当前构建绑定」内查看，构建时写入客户端。下载完成仍检查清单中的 SHA-256/长度/包身份。
 
 详见 [当前 API 协议](docs/api-contract.md)。
 
@@ -90,6 +93,7 @@ php bin/package.php
 ```sh
 PHP_BINARY=php python3 tests/integration.py
 node tests/upload-ui.test.cjs
+PHP_BINARY=php python3 tests/installer-update.py --installer /定制版巨魔工程完整路径/TrollInstallerX
 ```
 
 Python 3 测试使用标准库，自动创建临时 PHP 多进程服务器与合成测试包，结束后清理，不触及正式 storage。Node 仅用于上传控制器回归测试，运行服务不需要 Node。

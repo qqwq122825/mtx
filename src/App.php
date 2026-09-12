@@ -16,6 +16,7 @@ final class App
         if (function_exists('opcache_invalidate')) opcache_invalidate($path, true);
         if (!is_file($path)) throw new Problem(503, '服务尚未初始化，请先运行 bin/setup.php。', 'not_configured');
         $this->config = require $path;
+        if (!preg_match('/\A\/[a-z0-9-]{16,64}\z/D', $this->config['mount_path'] ?? '')) throw new \RuntimeException('Run bin/upgrade.php to configure private mount');
         $this->storage = rtrim($this->config['storage'], '/');
         $this->store = new Store($this->storage);
         if (!is_dir($this->storage . '/objects')) throw new \RuntimeException('Storage missing');
@@ -26,7 +27,8 @@ final class App
             throw new Problem(400, '请通过 HTTPS 访问。', 'https_required');
         }
     }
-    public function url(string $path): string { return rtrim($this->config['base_url'], '/') . $path; }
+    public function path(string $path): string { return $this->config['mount_path'] . $path; }
+    public function url(string $path): string { return rtrim($this->config['base_url'], '/') . $this->path($path); }
     public function object(string $sha): string
     {
         if (!preg_match('/\A[a-f0-9]{64}\z/D', $sha)) throw new Problem(404, '文件不存在。');

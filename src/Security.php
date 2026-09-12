@@ -9,7 +9,7 @@ final class Security
         session_save_path($app->storage . '/sessions');
         ini_set('session.use_strict_mode', '1');
         ini_set('session.use_only_cookies', '1');
-        session_set_cookie_params(['lifetime' => 0, 'path' => '/admin', 'secure' => !$app->config['local_http'], 'httponly' => true, 'samesite' => 'Strict']);
+        session_set_cookie_params(['lifetime' => 0, 'path' => $app->path('/admin'), 'secure' => !$app->config['local_http'], 'httponly' => true, 'samesite' => 'Strict']);
         session_start();
         if (!isset($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
     }
@@ -50,10 +50,18 @@ final class Security
         $_SESSION = ['authenticated' => true, 'expires' => time() + 8 * 3600, 'csrf' => bin2hex(random_bytes(32)), 'credential' => hash('sha256', $app->config['password_hash'])];
         $app->store->change(function (&$s) { Store::audit($s, '管理员登录', 'admin'); });
     }
+    public static function nativeKeys(): array
+    {
+        $key = openssl_pkey_new(['private_key_type'=>OPENSSL_KEYTYPE_EC, 'curve_name'=>'prime256v1']);
+        if (!$key || !openssl_pkey_export($key, $pem)) throw new \RuntimeException('Key generation failed');
+        $details = openssl_pkey_get_details($key);
+        return ['native_sign_secret'=>$pem, 'native_sign_public'=>base64_encode("\x04" . str_pad($details['ec']['x'],32,"\0",STR_PAD_LEFT) . str_pad($details['ec']['y'],32,"\0",STR_PAD_LEFT))];
+    }
     public static function sign(App $app, array $payload): array
     {
         $raw = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-        return ['key_id' => $app->config['key_id'], 'payload_base64' => base64_encode($raw), 'signature_base64' => base64_encode(sodium_crypto_sign_detached($raw, base64_decode($app->config['sign_secret'], true)))];
+        if (!openssl_sign($raw, $nativeSignature, $app->config['native_sign_secret'], OPENSSL_ALGO_SHA256)) throw new \RuntimeException('Native signing failed');
+        return ['native_signature_base64' => base64_encode($nativeSignature), 'key_id' => $app->config['key_id'], 'payload_base64' => base64_encode($raw), 'signature_base64' => base64_encode(sodium_crypto_sign_detached($raw, base64_decode($app->config['sign_secret'], true)))];
     }
     public static function ticket(App $app, string $release, string $sha, int $expires): string
     { return hash_hmac('sha256', $release . ':' . $sha . ':' . $expires, $app->config['ticket_secret']); }
