@@ -1,0 +1,60 @@
+{
+  "example_only": true,
+  "note": "仅用于协议结构示例。标识、摘要、时间均为占位数据，无有效签名，也没有部署相应文件。",
+  "installer_binding": {
+    "app_key": "mtx-dfm-cn",
+    "display_name": "满天星三角洲国服",
+    "update_url": "https://updates.example.com/api/update.php?app=mtx-dfm-cn",
+    "expected_bundle_id": "com.mtx.scmtxdfm",
+    "profile_id": "mtx-dfm-remote-v1",
+    "trusted_public_keys": {
+      "release-2026": null
+    },
+    "allowed_download_hosts": [
+      "downloads.example.com"
+    ]
+  },
+  "request_parameters": {
+    "app": "mtx-dfm-cn",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "installer_version": "0.8.0",
+    "os_version": "16.1.2",
+    "profile": "mtx-dfm-remote-v1"
+  },
+  "decoded_signed_payload_example": {
+    "schema_version": 1,
+    "app_key": "mtx-dfm-cn",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "issued_at": "2026-09-12T08:00:00Z",
+    "expires_at": "2026-09-12T08:10:00Z",
+    "status": "version_unknown",
+    "message": "本地已安装版本待确认，可下载并安装服务器发布的版本。",
+    "release": {
+      "release_id": "11111111111111111111111111111111",
+      "sequence": 1,
+      "display_version": "1.0",
+      "bundle_version": "1",
+      "bundle_id": "com.mtx.scmtxdfm",
+      "profile_id": "mtx-dfm-remote-v1",
+      "artifact_id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "artifact_format": "prepared-payload-v1",
+      "artifact_bytes": 10240,
+      "artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "min_installer_version": "0.8.0",
+      "min_ios": "14.0",
+      "max_ios": "16.6.1",
+      "changelog": "示例更新说明。",
+      "published_at": "2026-09-12T08:00:00Z"
+    }
+  },
+  "future_game_binding": {
+    "app_key": "mtx-arena-cn",
+    "display_name": "满天星暗区突围国服",
+    "update_url": "https://updates.example.com/api/update.php?app=mtx-arena-cn",
+    "expected_bundle_id": null,
+    "profile_id": null,
+    "enabled": false,
+    "requires_new_installer_build": true
+  }
+}

@@ -1,0 +1,60 @@
+<?php
+declare(strict_types=1);
+namespace MTX;
+final class Security
+{
+    public static function session(App $app): void
+    {
+        session_name('mtx_admin');
+        session_save_path($app->storage . '/sessions');
+        ini_set('session.use_strict_mode', '1');
+        ini_set('session.use_only_cookies', '1');
+        session_set_cookie_params(['lifetime' => 0, 'path' => '/admin', 'secure' => !$app->config['local_http'], 'httponly' => true, 'samesite' => 'Strict']);
+        session_start();
+        if (!isset($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
+    }
+    public static function loggedIn(App $app): bool
+    {
+        return ($_SESSION['authenticated'] ?? false) === true
+            && ($_SESSION['expires'] ?? 0) > time()
+            && hash_equals(hash('sha256', $app->config['password_hash']), (string)($_SESSION['credential'] ?? ''));
+    }
+    public static function csrf(): void
+    {
+        $token = $_POST['csrf'] ?? '';
+        if (!is_string($token) || !hash_equals($_SESSION['csrf'], $token)) throw new Problem(403, '页面令牌已失效，请刷新页面重试。', 'csrf');
+    }
+    public static function login(App $app, string $password): void
+    {
+        // A separate stable file lock also serializes simultaneous password attempts.
+        $lock = fopen($app->storage . '/login.lock', 'c');
+        if (!$lock || !flock($lock, LOCK_EX)) throw new \RuntimeException('Login lock failed');
+        try {
+            $path = $app->storage . '/login-attempts.json';
+            $data = is_file($path) ? json_decode(file_get_contents($path), true, 16, JSON_THROW_ON_ERROR) : [];
+            $now = time();
+            $data = array_filter($data, fn($row) => $row['until'] > $now);
+            $ip = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? 'local'); // Never trust forwarded headers.
+            $row = $data[$ip] ?? ['count' => 0, 'until' => $now + 900];
+            if ($row['count'] >= 5 || count($data) >= 10000) throw new Problem(429, '登录尝试较多，请 15 分钟后再试。', 'rate_limited');
+            if (strlen($password) > 72 || !password_verify($password, $app->config['password_hash'])) {
+                $row['count']++;
+                $data[$ip] = $row;
+                Store::write($path, json_encode($data, JSON_THROW_ON_ERROR));
+                throw new Problem(401, '密码不正确。', 'bad_password');
+            }
+            unset($data[$ip]);
+            Store::write($path, json_encode($data, JSON_THROW_ON_ERROR));
+        } finally { flock($lock, LOCK_UN); fclose($lock); }
+        session_regenerate_id(true);
+        $_SESSION = ['authenticated' => true, 'expires' => time() + 8 * 3600, 'csrf' => bin2hex(random_bytes(32)), 'credential' => hash('sha256', $app->config['password_hash'])];
+        $app->store->change(function (&$s) { Store::audit($s, '管理员登录', 'admin'); });
+    }
+    public static function sign(App $app, array $payload): array
+    {
+        $raw = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        return ['key_id' => $app->config['key_id'], 'payload_base64' => base64_encode($raw), 'signature_base64' => base64_encode(sodium_crypto_sign_detached($raw, base64_decode($app->config['sign_secret'], true)))];
+    }
+    public static function ticket(App $app, string $release, string $sha, int $expires): string
+    { return hash_hmac('sha256', $release . ':' . $sha . ':' . $expires, $app->config['ticket_secret']); }
+}

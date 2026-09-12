@@ -1,0 +1,16 @@
+upload_max_filesize = 256M
+post_max_size = 260M
+memory_limit = 256M
+max_execution_time = 300
+max_input_time = 300
+display_errors = Off
+log_errors = On
+session.use_strict_mode = 1
+session.use_only_cookies = 1
+session.cookie_httponly = 1
+session.cookie_samesite = Strict
+session.gc_probability = 1
+session.gc_divisor = 100
+session.gc_maxlifetime = 28800
+; Production PHP-FPM may restrict writable locations to this deployment's private storage.
+; Configure upload_tmp_dir with enough free disk space; never use a public directory.

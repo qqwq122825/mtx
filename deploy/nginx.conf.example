@@ -1,0 +1,45 @@
+# Replace domain, certificate and PHP-FPM socket with actual server values.
+# Never configure the repository root as document_root.
+# This example assumes a dedicated hostname and PHP-FPM terminating behind local Nginx.
+limit_req_zone $binary_remote_addr zone=mtx_api:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=mtx_admin:10m rate=2r/s;
+
+server {
+    listen 80;
+    server_name updates.example.com;
+    return 301 https://$host$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name updates.example.com;
+    ssl_certificate /etc/letsencrypt/live/updates.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/updates.example.com/privkey.pem;
+    root /srv/mtx/public;
+    index index.php;
+    client_max_body_size 260m;
+    client_body_timeout 300s;
+
+    location = / { return 302 /admin/; }
+    location = /admin { return 302 /admin/; }
+    location = /admin/ { rewrite ^ /admin/index.php last; }
+    location ~ ^/admin/(index|login|action)\.php$ {
+        limit_req zone=mtx_admin burst=15 nodelay;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTPS on;
+        fastcgi_pass unix:/run/php/php8.5-fpm.sock;
+        fastcgi_read_timeout 300s;
+    }
+    location ~ ^/api/(update|download-ticket|download)\.php$ {
+        limit_req zone=mtx_api burst=30 nodelay;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTPS on;
+        fastcgi_pass unix:/run/php/php8.5-fpm.sock;
+        fastcgi_read_timeout 300s;
+        # Signed links contain temporary bearer credentials; do not log query strings.
+        access_log off;
+    }
+    location ~ ^/assets/app\.(css|js)$ { try_files $uri =404; }
+    location / { return 404; }
+}

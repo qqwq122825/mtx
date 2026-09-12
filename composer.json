@@ -1,0 +1,24 @@
+{
+  "name": "mtx/update-center",
+  "description": "Password-protected PHP release center for fixed-game installer updates",
+  "type": "project",
+  "require": {
+    "php": "^8.3",
+    "ext-zip": "*",
+    "ext-sodium": "*",
+    "ext-mbstring": "*",
+    "rodneyrehm/plist": "^2.0.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "MTX\\": "src/"
+    }
+  },
+  "config": {
+    "sort-packages": true,
+    "allow-plugins": false
+  },
+  "scripts": {
+    "test": "python3 tests/integration.py"
+  }
+}
