@@ -14,7 +14,7 @@ macOS；PHP 8.5.1；Python 3.11.14；Node 24.9.0（仅测试）；Xcode 16.1。�
 - `tests/installer-update.py --installer /工程路径/TrollInstallerX`：**48 项原生客户端检查**。现场生成临时 P-256 密钥，PHP 签名，编译实际 Swift 下载器与 Objective-C 校验器，连接本机 HTTP fixture（HTTP 仅在测试编译标志下开放）。
 - 原生覆盖：TIPA 先于 TAR、字节进度、本地原包字节一致、缓存复用、错误签名/nonce/游戏/过期信息、无发布、短包/坏摘要、重定向/外站票据、坏清单摘要、TAR 路径穿越、旧序号、下载期间发布变化。失败的 TIPA 不触发后续 TAR 下载，临时分片清理。
 - 不可变资源交给助手后，再次校验正常签名；修改文件/Manifest/凭证，或删除凭证，均拦截。
-- 原工程 `Tests/run_tests.sh`：**45 个 Python 测试**；主机事务 **997**、间接事务 **721**、宿主选择 **776** 项断言，以及日志保存/导出、纯下载错误隐藏日志、选择取消/超时/100 轮并发点击测试通过。
+- 原工程 `Tests/run_tests.sh`：**45 个 Python 测试**；主机事务、间接事务、宿主选择的断言检查，以及日志保存/导出、纯下载错误隐藏日志、选择取消/超时/100 轮并发点击测试通过。
 - PHP/JS 语法、Composer 锁定依赖审计通过。
 - `installer-integration/remote-update.patch` 在临时基线应用后，所有文件摘要匹配；重复执行幂等。
 - iOS Release 构建成功；新产物 `MTXInstaller-remote-unsigned.tipa` 为 **0.8.0 / build 16**。外层待用户签名，内层依旧走现有准备机制。
