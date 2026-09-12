@@ -14,8 +14,9 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
             case 'save': $bot->saveSettings($_POST);$notice='配置已保存，尚未启用。部署到 HTTPS 后点击启用。';break;
             case 'replies': $bot->saveReplies($_POST);$notice='自动回复已保存，新消息立即使用，无需暂停机器人。';break;
             case 'connect': $bot->connect();$notice='Webhook 已启用，管理员已收到测试消息。';break;
+            case 'refresh': $bot->refreshWebhook();$notice='消息订阅已更新，欢迎卡片按钮可接收点击。';break;
             case 'disconnect': $bot->disconnect();$notice='机器人已暂停，Webhook 已移除。';break;
-            case 'status': $status=$bot->status();$notice='Webhook '.($status['matches']?'地址匹配':'尚未指向本站').'；待处理 '.$status['pending'].' 条。'.($status['has_error']?' Telegram 记录过投递异常，请核对 HTTPS/CDN 配置。':'');break;
+            case 'status': $status=$bot->status();$notice='Webhook '.($status['matches']?'地址匹配':'尚未指向本站').'；待处理 '.$status['pending'].' 条。'.($status['callbacks']?' 欢迎卡片点击已订阅。':' 请点击更新消息订阅以启用卡片按钮。').($status['has_error']?' Telegram 记录过投递异常，请核对 HTTPS/CDN 配置。':'');break;
             default: throw new Problem(422,'操作类型异常。');
         }
         $_SESSION['telegram_notice']=['ok'=>true,'text'=>$notice];
@@ -42,12 +43,13 @@ $labels=['delivered'=>'已处理','failed'=>'失败','uncertain'=>'结果待确�
 <label for="bot-admin">管理员 Telegram 数字 ID</label><input id="bot-admin" name="admin_id" inputmode="numeric" pattern="[1-9][0-9]{0,15}" required value="<?=$c['admin_id']?e($c['admin_id']):''?>" placeholder="个人账号的数字 ID，不是 @用户名" <?=$c['enabled']?'disabled':''?>>
 <button class="button primary full" type="submit" <?=$c['enabled']?'disabled':''?>>保存配置</button></form>
 <div class="bot-actions"><form method="post" action="<?=e($app->path('/admin/telegram.php'))?>"><?php hidden('connect') ?><button class="button primary" type="submit" <?=!$configured || $c['enabled']?'disabled':''?>>启用 Webhook</button></form><form method="post" action="<?=e($app->path('/admin/telegram.php'))?>"><?php hidden('status') ?><button class="button quiet" type="submit" <?=$configured?'':'disabled'?>>检查连接</button></form><form method="post" action="<?=e($app->path('/admin/telegram.php'))?>" data-confirm="暂停后停止转发、回复和新公告投递；已发公告仍按计划删除。确认暂停？"><?php hidden('disconnect') ?><button class="text-button danger" type="submit" <?=$configured?'':'disabled'?>>暂停机器人</button></form></div>
+<?php if ($c['enabled']): ?><details class="bot-endpoint"><summary>卡片按钮接入维护</summary><p class="muted compact">从旧版升级后，点击一次“更新消息订阅”即可接收卡片按钮点击；不暂停机器人，不清空消息。</p><form method="post" action="<?=e($app->path('/admin/telegram.php'))?>"><?php hidden('refresh') ?><button class="button quiet" type="submit">更新消息订阅</button></form></details><?php endif ?>
 <?php if ($c['username']): ?><p class="muted compact">用户入口：<a class="text-button" href="https://t.me/<?=e($c['username'])?>" target="_blank" rel="noopener noreferrer">@<?=e($c['username'])?></a></p><?php endif ?>
 </section><section class="panel"><div class="section-title"><div><span class="step-number">02</span><h2>使用方式</h2></div></div><ol class="bot-steps"><li><strong>用户发给机器人</strong><p>支持文字、图片、文件、语音、视频和贴纸。只处理私聊，不读取群组或频道。</p></li><li><strong>你直接回复对应消息</strong><p>机器人将用户消息与会话卡片发给你。长按其中一条选择“回复”，回信会经机器人送达用户，不附带你的账号转发来源。</p></li><li><strong>管理骚扰消息</strong><p>回复用户消息发送 <code>/block</code> 屏蔽；发送 <code>/unblock 数字ID</code> 解除。<code>/who</code> 查询当前回复对象。</p></li></ol>
 <div class="note-box"><strong>部署后再启用</strong><p>Webhook 需要公网 HTTPS；CDN 对此路径关闭缓存和浏览器挑战，保留 POST 与校验头。Webhook 地址不包含 Token。</p></div><div class="bot-endpoint"><span class="endpoint-label">Webhook 地址</span><code><?=e($bot->webhookURL())?></code></div>
 <p class="muted compact">若 Telegram 限制账号与机器人交流，仍以平台实际提示为准。客服消息仅在用户主动联系后回复。群组 / 频道公告请在“公告卡片”页单独配置。</p></section></div>
 <section class="panel bot-records" id="auto-replies"><div class="section-title"><div><span class="step-number">03</span><h2>默认自动回复</h2></div><span class="muted">即时生效 · 无需暂停</span></div>
-<p class="muted compact">点击“开始”或发送 /start 展示欢迎语和三个快捷按钮。选择按钮后提示补充信息，实际问题仍转发给你。管理员也可以发送 /start 预览，发送 /help 查看管理指令。</p>
+<p class="muted compact">点击“开始”或发送 /start 展示欢迎卡片，三个按钮直接附在消息下方，不占用输入框。点击卡片按钮后提示补充信息，实际问题仍转发给你。管理员也可以发送 /start 预览，发送 /help 查看管理指令。</p>
 <form method="post" action="<?=e($app->path('/admin/telegram.php'))?>" class="bot-form"><?php hidden('replies') ?>
 <?php foreach (TelegramReplies::LABELS as $key=>$label): ?><div><label for="reply-<?=e($key)?>"><?=e($label)?></label><textarea id="reply-<?=e($key)?>" name="<?=e($key)?>" rows="3" maxlength="1000" required><?=e($replies[$key])?></textarea></div><?php endforeach ?>
 <p class="muted compact">纯文字，支持换行，每项最多 1000 字。消息收到提示仅在实际问题成功转发后发送，同一用户 30 分钟内最多一次；连续补充文字、图片时不重复打扰。保存文案不会发送消息或修改 Token、会话、公告设置。</p>

@@ -38,7 +38,8 @@ final class TelegramReplies
     }
     public static function keyboard(): array
     {
-        $buttons=array_map(fn($text)=>['text'=>$text],array_keys(self::BUTTONS));
-        return ['keyboard'=>[array_slice($buttons,0,2),array_slice($buttons,2)],'resize_keyboard'=>true,'one_time_keyboard'=>true,'input_field_placeholder'=>'直接发送问题，或选择咨询类型'];
+        $buttons=[];
+        foreach (self::BUTTONS as $text=>$field) $buttons[]=['text'=>$text,'callback_data'=>'mtx:reply:'.$field];
+        return ['inline_keyboard'=>[array_slice($buttons,0,2),array_slice($buttons,2)]];
     }
 }

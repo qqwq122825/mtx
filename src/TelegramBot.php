@@ -64,8 +64,21 @@ final class TelegramBot
             $this->api->call($c['token'],'sendMessage',['chat_id'=>$c['admin_id'],'text'=>'满天星客服机器人正在接入。收到用户消息后，请使用 Telegram 的“回复”功能回信。']);
             $s['settings']['username']=$me['username'];$s['settings']['enabled']=true;$this->store->save($s);
             try {
-                if ($this->api->call($c['token'],'setWebhook',['url'=>$this->webhookURL(),'secret_token'=>$c['secret'],'allowed_updates'=>['message'],'max_connections'=>1,'drop_pending_updates'=>false])!==true) throw new TelegramApiError(0,true);
+                $this->registerWebhook($c);
             } catch (TelegramApiError $e) { $s['settings']['enabled']=false;$this->store->save($s);throw $e; }
+        });
+    }
+    private function registerWebhook(#[\SensitiveParameter] array $c): void
+    {
+        if ($this->api->call($c['token'],'setWebhook',['url'=>$this->webhookURL(),'secret_token'=>$c['secret'],'allowed_updates'=>['message','callback_query'],'max_connections'=>1,'drop_pending_updates'=>false])!==true) throw new TelegramApiError(0,true);
+    }
+    /** Update subscriptions in place; keep the existing binding, queue and conversations. */
+    public function refreshWebhook(): void
+    {
+        if ($this->app->config['local_http'] || parse_url($this->webhookURL(),PHP_URL_SCHEME)!=='https') throw new Problem(422,'请在正式 HTTPS 后台更新消息订阅。');
+        $this->store->locked(function ($s) {
+            if (!$s['settings']['enabled']) throw new Problem(409,'请先启用机器人。');
+            $this->registerWebhook($s['settings']);
         });
     }
     public function disconnect(): void
@@ -82,7 +95,7 @@ final class TelegramBot
             $status=$this->api->call($s['settings']['token'],'getWebhookInfo');
             if (!is_array($status)) throw new TelegramApiError(0,true);
             // Do not echo arbitrary URLs/error descriptions from the remote API.
-            return ['matches'=>($status['url']??'')===$this->webhookURL(),'pending'=>max(0,(int)($status['pending_update_count']??0)),'has_error'=>isset($status['last_error_date'])];
+            return ['matches'=>($status['url']??'')===$this->webhookURL(),'pending'=>max(0,(int)($status['pending_update_count']??0)),'has_error'=>isset($status['last_error_date']),'callbacks'=>in_array('callback_query',$status['allowed_updates']??[],true)];
         });
     }
     private function prune(array &$s): void
@@ -111,6 +124,16 @@ final class TelegramBot
     {
         foreach (['text','photo','document','audio','voice','video','video_note','sticker','animation'] as $field) if (isset($m[$field])) return true;
         return false;
+    }
+    /** A card click may only answer its human owner in this bot's own private chat. */
+    private function cardClick(mixed $query,#[\SensitiveParameter] array $settings): ?array
+    {
+        if (!is_array($query) || !is_string($query['id']??null) || !preg_match('/\A[\x21-\x7e]{1,256}\z/D',$query['id'])) return null;
+        $from=$query['from']??[];$message=$query['message']??[];$data=$query['data']??null;
+        if (!is_string($data) || !preg_match('/\Amtx:reply:(consult|install|support)\z/D',$data,$match)) return null;
+        if (($from['is_bot']??true)!==false || !is_int($from['id']??null) || $from['id']<=0 || ($message['chat']['type']??'')!=='private' || ($message['chat']['id']??null)!==$from['id']) return null;
+        if (($message['from']['is_bot']??false)!==true || ($message['from']['id']??null)!==(int)explode(':',$settings['token'],2)[0] || !is_int($message['message_id']??null) || $message['message_id']<1 || isset($query['inline_message_id'])) return null;
+        return ['id'=>$query['id'],'peer'=>$from['id'],'field'=>$match[1]];
     }
     /** Store intent before each non-idempotent API call; never blindly resend an ambiguous call. */
     private function step(array &$s,int $update,string $step,string $method,array $params,?int $routePeer=null): array|bool
@@ -144,8 +167,15 @@ final class TelegramBot
             $this->prune($s);$id=$update['update_id'];$m=$update['message']??null;
             if (isset($s['updates'][$id]) && in_array($s['updates'][$id]['status'],['done','failed','uncertain'],true)) return;
             if (($s['updates'][$id]['retry_at']??0)>time()) throw new Problem(503,'机器人稍后重试。');
-            if (!is_array($m) || ($m['chat']['type']??'')!=='private' || ($m['from']['is_bot']??true)!==false || !is_int($m['chat']['id']??null) || $m['chat']['id']<=0 || ($m['from']['id']??null)!==$m['chat']['id'] || !is_int($m['message_id']??null) || $m['message_id']<1 || !is_int($m['date']??null) || $m['date']<time()-86400 || $m['date']>time()+60) return;
-            $peer=$m['chat']['id'];$admin=$peer===$c['admin_id'];$text=is_string($m['text']??null)?trim($m['text']):'';
+            $click=null;
+            if (array_key_exists('callback_query',$update)) {
+                $click=$this->cardClick($update['callback_query'],$c);if (!$click) return;
+                $peer=$click['peer'];$text='';
+            } else {
+                if (!is_array($m) || ($m['chat']['type']??'')!=='private' || ($m['from']['is_bot']??true)!==false || !is_int($m['chat']['id']??null) || $m['chat']['id']<=0 || ($m['from']['id']??null)!==$m['chat']['id'] || !is_int($m['message_id']??null) || $m['message_id']<1 || !is_int($m['date']??null) || $m['date']<time()-86400 || $m['date']>time()+60) return;
+                $peer=$m['chat']['id'];$text=is_string($m['text']??null)?trim($m['text']):'';
+            }
+            $admin=$peer===$c['admin_id'];
             if (!isset($s['updates'][$id])) {
                 // Bounds prevent disk growth; no eviction of recent deduplication IDs.
                 if (count($s['updates'])>=20000 || count($s['rates'])>=10000) throw new Problem(503,'机器人繁忙，请稍后重试。');
@@ -156,13 +186,18 @@ final class TelegramBot
             }
             $send=function (string $step,int $chat,string $body,?int $route=null,?array $keyboard=null) use (&$s,$id) {
                 $params=['chat_id'=>$chat,'text'=>$body,'link_preview_options'=>['is_disabled'=>true]];
-                if ($keyboard!==null) $params['reply_markup']=$keyboard;
+                $params['reply_markup']=$keyboard??['remove_keyboard'=>true];
                 return $this->step($s,$id,$step,'sendMessage',$params,$route);
             };
             $replies=TelegramReplies::read($s);
             $eventPeer=$peer;
             try {
-                if (preg_match('/\A\/(start|help|id)(?:@[A-Za-z0-9_]+)?(?:\s.*)?\z/s',$text,$match)) {
+                if ($click) {
+                    // Dismiss the Telegram spinner; an expired acknowledgement must not
+                    // prevent the actual reply. Content delivery still uses step journaling.
+                    try { $this->api->call($c['token'],'answerCallbackQuery',['callback_query_id'=>$click['id']]); } catch (TelegramApiError) {}
+                    $send('quick_reply',$peer,$replies[$click['field']]);
+                } elseif (preg_match('/\A\/(start|help|id)(?:@[A-Za-z0-9_]+)?(?:\s.*)?\z/s',$text,$match)) {
                     $body=match($match[1]) {
                         'id'=>'你的 Telegram 数字 ID：'.$peer,
                         'help'=>$admin?'客服管理：对用户消息或会话卡片使用“回复”即可回信。回复会话发送 /block 可屏蔽；/unblock 数字ID 解除；回复 /who 查看用户 ID。':$replies['welcome'],

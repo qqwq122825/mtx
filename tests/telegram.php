@@ -21,7 +21,7 @@ try {
     $api=new TelegramApi(function($method,$params) use (&$calls,&$next,&$failure) {
         $calls[]=[$method,$params];
         if ($failure && $failure[0]===$method && (!isset($failure[2]) || ($params['chat_id']??null)===$failure[2])) { $e=$failure[1];$failure=null;throw $e; }
-        return match($method) {'getMe'=>['is_bot'=>true,'username'=>'MTXFixtureBot'],'setWebhook','deleteWebhook'=>true,'getWebhookInfo'=>['url'=>'https://updates.example.com/r-telegram-fixture-0123456789/api/telegram-webhook.php','pending_update_count'=>2],default=>['message_id'=>++$next,'text'=>'RESPONSE_CONTENT_NOT_FOR_STORAGE']};
+        return match($method) {'getMe'=>['is_bot'=>true,'username'=>'MTXFixtureBot'],'setWebhook','deleteWebhook','answerCallbackQuery'=>true,'getWebhookInfo'=>['url'=>'https://updates.example.com/r-telegram-fixture-0123456789/api/telegram-webhook.php','pending_update_count'=>2,'allowed_updates'=>['message','callback_query']],default=>['message_id'=>++$next,'text'=>'RESPONSE_CONTENT_NOT_FOR_STORAGE']};
     });
     $bot=new TelegramBot(new App(),$api);$admin=77777;$a=88888;$b=99999;
     $token='123456:'.str_repeat('x',40);
@@ -31,13 +31,14 @@ try {
     $bot->saveSettings(['token'=>$token,'admin_id'=>(string)$admin]);$secret=$bot->store->read()['settings']['secret'];
     check(strlen($secret)===64 && count($calls)===0,'save generates private webhook secret without API calls');
     $bot->saveSettings(['token'=>'','admin_id'=>(string)$admin]);check($bot->store->read()['settings']['token']===$token,'blank token preserves stored secret');
+    check(problem(fn()=>$bot->refreshWebhook(),422) && count($calls)===0,'localhost cannot refresh webhook subscriptions');
     check(problem(fn()=>$bot->connect(),422) && count($calls)===0,'localhost never registers a webhook');
     $config['base_url']='https://updates.example.com';$config['local_http']=false;Store::write($path,'<?php return '.var_export($config,true).';');$bot=new TelegramBot(new App(),$api);
     $bot->connect();check(array_column($calls,0)===['getMe','sendMessage','setWebhook'],'connect validates bot, pings operator, registers webhook');
-    check($calls[1][1]['chat_id']===$admin && $calls[2][1]['secret_token']===$secret && $calls[2][1]['max_connections']===1 && $calls[2][1]['allowed_updates']===['message'] && !$calls[2][1]['drop_pending_updates'],'webhook secret, private admin and constrained updates');
+    check($calls[1][1]['chat_id']===$admin && $calls[2][1]['secret_token']===$secret && $calls[2][1]['max_connections']===1 && $calls[2][1]['allowed_updates']===['message','callback_query'] && !$calls[2][1]['drop_pending_updates'],'webhook secret, private admin and constrained updates');
     check($bot->store->read()['settings']['enabled'] && $bot->store->read()['settings']['username']==='MTXFixtureBot','successful activation saved');
     check(problem(fn()=>$bot->saveSettings(['token'=>$token,'admin_id'=>'55555']),409),'active binding cannot be replaced');
-    check($bot->status()===['matches'=>true,'pending'=>2,'has_error'=>false],'connection status only returns sanitized fields');
+    check($bot->status()===['matches'=>true,'pending'=>2,'has_error'=>false,'callbacks'=>true],'connection status only returns sanitized fields');
     $pair=['message'=>['chat'=>['type'=>'private','id'=>$admin],'from'=>['id'=>$admin,'is_bot'=>false],'text'=>'/id random-challenge','date'=>time()]];
     check(TelegramBot::findPairingID([$pair],'/id random-challenge')===$admin,'new-bot ID helper matches exact private command');
     check(TelegramBot::findPairingID([$pair],'/id wrong')===null,'ID helper ignores unrelated messages');
@@ -50,7 +51,7 @@ try {
     $deliver=function(array $u) use ($bot,$secret,&$calls):array { $n=count($calls);$bot->receive($u,$secret);return array_slice($calls,$n); };
     check(problem(fn()=>$bot->receive($message($a),'wrong'),403),'forged webhook secret rejected');
     check(problem(fn()=>$bot->receive(['update_id'=>'1'],$secret),422),'update ID is strictly integer');
-    $out=$deliver($message($a,['text'=>'/start']));check(count($out)===1 && $out[0][1]['chat_id']===$a && str_contains($out[0][1]['text'],'看到消息后') && isset($out[0][1]['reply_markup']['keyboard']),'user welcome includes reply choices');
+    $out=$deliver($message($a,['text'=>'/start']));check(count($out)===1 && $out[0][1]['chat_id']===$a && str_contains($out[0][1]['text'],'看到消息后') && isset($out[0][1]['reply_markup']['inline_keyboard']) && !isset($out[0][1]['reply_markup']['keyboard']),'user welcome includes reply choices');
     $out=$deliver($message($a,['text'=>'/id']));check(str_contains($out[0][1]['text'],(string)$a),'id command returns caller only');
     $settings=$bot->store->read()['settings'];$defaults=TelegramReplies::defaults();
     check(TelegramReplies::read($bot->store->read())===$defaults,'existing state uses default replies without migration');
@@ -59,7 +60,7 @@ try {
         check(count($out)===1 && $out[0][1]['text']===$defaults[$field] && $out[0][1]['chat_id']===121212,'quick reply only goes to the requesting user: '.$field);
     }
     $out=$deliver($message($admin,['text'=>'/start']));check($out[0][1]['text']===$defaults['welcome'],'operator can preview the same welcome');
-    $out=$deliver($message($admin,['text'=>'/help']));check(str_contains($out[0][1]['text'],'/block') && !isset($out[0][1]['reply_markup']),'operator help keeps moderation instructions');
+    $out=$deliver($message($admin,['text'=>'/help']));check(str_contains($out[0][1]['text'],'/block') && ($out[0][1]['reply_markup']['remove_keyboard']??false),'operator help keeps moderation instructions');
     $custom=$defaults;$custom['welcome']="CUSTOM welcome <tag>\nSecond line";
     $bot->saveReplies($custom+['token'=>'ignored','admin_id'=>'123']);
     check($bot->store->read()['settings']===$settings,'editing replies while enabled preserves binding and webhook secret');
@@ -140,8 +141,43 @@ try {
         foreach($pids as $pid){pcntl_waitpid($pid,$status);check(pcntl_wexitstatus($status)===0,'concurrent worker completed');}
         check(file($log,FILE_IGNORE_NEW_LINES)===['sendMessage','copyMessage','sendMessage'],'concurrent duplicate updates forwarded and acknowledged exactly once in normal execution');
     }
+    $before=$bot->store->read();$n=count($calls);$bot->refreshWebhook();$newCalls=array_slice($calls,$n);
+    check(count($newCalls)===1 && $newCalls[0][0]==='setWebhook' && $newCalls[0][1]['allowed_updates']===['message','callback_query'] && !$newCalls[0][1]['drop_pending_updates'],'subscription refresh adds card callbacks without dropping pending updates');
+    check($bot->store->read()===$before,'subscription refresh leaves enabled binding, templates, routes and state intact');
+    $card=TelegramReplies::keyboard();$buttons=array_merge(...$card['inline_keyboard']);
+    check(array_column($buttons,'callback_data')===['mtx:reply:consult','mtx:reply:install','mtx:reply:support'] && !isset($card['keyboard']),'welcome uses message-attached callback buttons only');
+    $callback=function(int $chat,string $field='consult',array $extra=[])use(&$uid):array {
+        $id=$uid++;return ['update_id'=>$id,'callback_query'=>array_replace_recursive(['id'=>'query-'.$id,'from'=>['id'=>$chat,'is_bot'=>false],'data'=>'mtx:reply:'.$field,'message'=>['message_id'=>654321,'date'=>time()-86400*7,'chat'=>['id'=>$chat,'type'=>'private'],'from'=>['id'=>123456,'is_bot'=>true],'text'=>'PRIVATE_CALLBACK_CARD_BODY']],$extra)];
+    };
+    check(problem(fn()=>$bot->receive($callback(313131),'bad'),403),'callback requires the same webhook secret');
+    $beforeRoutes=$bot->store->read()['routes'];
+    foreach (['consult','install','support'] as $field) {
+        $u=$callback(313131,$field);$out=$deliver($u);
+        check(array_column($out,0)===['answerCallbackQuery','sendMessage'] && $out[0][1]['callback_query_id']===$u['callback_query']['id'] && $out[1][1]['chat_id']===313131 && $out[1][1]['text']===$defaults[$field],'card click acknowledges spinner and replies privately: '.$field);
+        check($deliver($u)===[],'duplicate callback update does not resend: '.$field);
+    }
+    check($bot->store->read()['routes']===$beforeRoutes && !isset($bot->store->read()['reply_receipts'][313131]),'menu callbacks create neither support routes nor received receipts');
+    $out=$deliver($callback($admin,'install'));check($out[1][1]['text']===$defaults['install'] && ($out[1][1]['reply_markup']['remove_keyboard']??false),'operator can test a card and old input keyboard is removed');
+    $edited=$defaults;$edited['consult']='CUSTOM consult <tag>';$bot->saveReplies($edited);
+    $out=$deliver($callback(313131));check($out[1][1]['text']===$edited['consult'] && !isset($out[1][1]['parse_mode']),'old card clicks immediately use saved plain-text templates');$bot->saveReplies($defaults);
+    $invalid=[['data'=>'mtx:reply:unknown'],['data'=>'/block'],['data'=>[]],['id'=>''],['id'=>str_repeat('a',257)],['id'=>"query\ncontrol"],['from'=>['id'=>0]],['from'=>['is_bot'=>true]],['message'=>['chat'=>['type'=>'group']]],['message'=>['chat'=>['id'=>919191]]],['message'=>['from'=>['id'=>999999]]],['message'=>['from'=>['is_bot'=>false]]],['message'=>['message_id'=>0]],['inline_message_id'=>'foreign-inline']];
+    foreach($invalid as $bad) check($deliver($callback(323232,'consult',$bad))===[],'invalid or foreign callback ignored: '.json_encode($bad));
+    $inaccessible=$callback(323232);unset($inaccessible['callback_query']['message']['from']);check($deliver($inaccessible)===[],'inaccessible card with no verifiable bot sender ignored');
+    $bot->store->locked(function(&$s)use($bot){$s['blocked'][333334]=time();$bot->store->save($s);});
+    check($deliver($callback(333334))===[],'blocked user cannot trigger card replies');
+    for($i=0;$i<10;$i++)$deliver($callback(333335));check($deliver($callback(333335))===[],'card clicks share per-user rate limit');
+    $failure=['answerCallbackQuery',new TelegramApiError(400)];$out=$deliver($callback(343434));
+    check(count($out)===2 && $out[1][1]['text']===$defaults['consult'],'expired callback acknowledgement does not block actual reply');
+    $failure=['sendMessage',new TelegramApiError(429,false,1),343435];$u=$callback(343435);
+    check(problem(fn()=>$bot->receive($u,$secret),503),'card reply 429 uses existing retry journal');
+    $bot->store->locked(function(&$s)use($bot,$u){$s['updates'][$u['update_id']]['retry_at']=0;$bot->store->save($s);});
+    $out=$deliver($u);check(count($out)===2 && $out[1][1]['chat_id']===343435 && $deliver($u)===[],'card reply retry sends content once');
+    $failure=['sendMessage',new TelegramApiError(0,true),343436];$u=$callback(343436);$deliver($u);
+    check($bot->store->read()['updates'][$u['update_id']]['status']==='uncertain' && $deliver($u)===[],'ambiguous card reply is never resent automatically');
+    check(!str_contains(file_get_contents($bot->store->directory.'/state.json'),'PRIVATE_CALLBACK_CARD_BODY'),'callback card body is not stored');
     $failure=['deleteWebhook',new TelegramApiError(0,true)];try{$bot->disconnect();}catch(TelegramApiError){}check(!$bot->store->read()['settings']['enabled'],'pause is local-first even if remote removal is uncertain');
     check($deliver($message($b))===[],'paused valid webhook does not send');
+    check($deliver($callback($b))===[] && problem(fn()=>$bot->refreshWebhook(),409),'paused bot neither answers cards nor refreshes subscriptions');
     $bot->saveSettings(['token'=>'123456:'.str_repeat('y',40),'admin_id'=>'55555']);$state=$bot->store->read();check(!$state['routes']&&!$state['updates']&&!$state['blocked']&&$state['settings']['secret']!==$secret,'new bot/operator clears prior identity mappings and rotates webhook secret');
     check(problem(fn()=>$bot->checkSecret($secret),403),'old webhook secret invalidated');
     $failure=['sendMessage',new TelegramApiError(403)];try{$bot->connect();}catch(TelegramApiError){}check(!$bot->store->read()['settings']['enabled'],'operator must start bot before activation');

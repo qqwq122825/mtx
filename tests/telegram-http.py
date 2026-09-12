@@ -84,10 +84,17 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         check(request(hook,body=b' '*262145,headers=h)[0]==413,'webhook body bounded at 256 KiB')
         request('/admin/telegram.php',fields={'csrf':csrf(),'action':'connect'})
         page=request('/admin/telegram.php')[1];check('公网 HTTPS'.encode() in page and not json.loads(statepath.read_text())['settings']['enabled'],'local connect blocked before any Telegram call')
+        check(request('/admin/telegram.php',fields={'csrf':'bad','action':'refresh'})[0]==403,'subscription refresh requires CSRF')
+        request('/admin/telegram.php',fields={'csrf':csrf(),'action':'refresh'})
+        check('HTTPS'.encode() in request('/admin/telegram.php')[1],'localhost subscription refresh stops before network')
         state['settings']['enabled']=True;statepath.write_text(json.dumps(state))
         update={'update_id':2,'message':{'chat':{'type':'group','id':-123},'from':{'id':77777,'is_bot':False},'message_id':4,'date':int(time.time()),'text':'MUST_NOT_BE_SENT'}}
         check(request(hook,body=json.dumps(update).encode(),headers=h)[0]==200,'authenticated group update ignored over real HTTP')
         check(not json.loads(statepath.read_text())['updates'],'ignored group creates no relay job')
+        bad_callback={'update_id':3,'callback_query':{'id':'fixture-query','from':{'id':88888,'is_bot':False},'data':'mtx:reply:consult','message':{'message_id':1,'chat':{'type':'group','id':-123},'from':{'id':123456,'is_bot':True}}}}
+        check(request(hook,body=json.dumps(bad_callback).encode(),headers=h)[0]==200 and not json.loads(statepath.read_text())['updates'],'group callback is ignored over real HTTP without outbound calls')
+        check('卡片按钮接入维护'.encode() in request('/admin/telegram.php')[1],'enabled backend exposes subscription upgrade control')
+
         before=json.loads(statepath.read_text());edited=reply_draft|{'welcome':'你好，这里是满天星 ✨'}
         check(request('/admin/telegram.php',fields=edited|{'csrf':csrf(),'action':'replies','token':'ignored','admin_id':'99999'})[0]==303,'edit auto-replies while bot remains enabled')
         current=json.loads(statepath.read_text())
