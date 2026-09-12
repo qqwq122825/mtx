@@ -9,8 +9,8 @@ if ($path === $mount || $path === $mount.'/') MTX\Http::redirect($app->path('/ad
 if (!str_starts_with($path, $mount.'/')) $notFound();
 $route = substr($path, strlen($mount));
 $GLOBALS['mtx_route'] = $route;
-$routes = ['/admin/telegram.php'=>'admin/telegram.php','/api/telegram-webhook.php'=>'api/telegram-webhook.php','/admin'=>'admin/index.php','/admin/'=>'admin/index.php','/admin/index.php'=>'admin/index.php','/admin/login.php'=>'admin/login.php','/admin/action.php'=>'admin/action.php','/api/update.php'=>'api/update.php','/api/download-ticket.php'=>'api/download-ticket.php','/api/download.php'=>'api/download.php'];
-if (in_array($route, ['/assets/app.css','/assets/app.js'], true)) {
+$routes = ['/admin/telegram-announcements.php'=>'admin/telegram-announcements.php','/admin/telegram.php'=>'admin/telegram.php','/api/telegram-webhook.php'=>'api/telegram-webhook.php','/admin'=>'admin/index.php','/admin/'=>'admin/index.php','/admin/index.php'=>'admin/index.php','/admin/login.php'=>'admin/login.php','/admin/action.php'=>'admin/action.php','/api/update.php'=>'api/update.php','/api/download-ticket.php'=>'api/download-ticket.php','/api/download.php'=>'api/download.php'];
+if (in_array($route, ['/assets/app.css','/assets/app.js','/assets/telegram-announcements.js'], true)) {
     MTX\Http::method('GET','HEAD');
     header('Content-Type: '.(str_ends_with($route,'.css')?'text/css':'text/javascript').'; charset=utf-8');
     header('Cache-Control: public, max-age=300');

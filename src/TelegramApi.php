@@ -7,7 +7,7 @@ final class TelegramApi
     public function __construct(private readonly ?\Closure $transport=null) {}
     public function call(#[\SensitiveParameter] string $token,string $method,#[\SensitiveParameter] array $params=[]): array|bool
     {
-        if (!in_array($method,['getMe','getUpdates','setWebhook','deleteWebhook','getWebhookInfo','sendMessage','copyMessage'],true)) throw new \LogicException('Unsupported Telegram method');
+        if (!in_array($method,['getMe','getUpdates','setWebhook','deleteWebhook','getWebhookInfo','sendMessage','copyMessage','getChat','deleteMessage'],true)) throw new \LogicException('Unsupported Telegram method');
         $json=json_encode((object)$params,JSON_THROW_ON_ERROR);
         if ($this->transport) return ($this->transport)($method,$params,$json);
         if (!function_exists('curl_init')) throw new TelegramApiError(0);

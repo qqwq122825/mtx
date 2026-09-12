@@ -31,7 +31,15 @@ final class TelegramBot
             if (!preg_match('/\A[1-9][0-9]{4,19}:[A-Za-z0-9_-]{30,100}\z/',$token)) throw new Problem(422,'请填写 BotFather 提供的完整 Bot Token。');
             $admin=self::id($input['admin_id']??null);
             $changed=$token!==$s['settings']['token'] || $admin!==$s['settings']['admin_id'];
-            if ($changed) $s=TelegramStore::emptyState();
+            if ($changed) {
+                foreach ($s['announcements']['jobs']??[] as $job) {
+                    if (in_array($job['delete_status'],['waiting','pending','retry'],true)) throw new Problem(409,'还有待删除的公告，请完成清理后再更换机器人或管理员。');
+                }
+                $draft=$s['settings']['token']==='' ? ($s['announcements']??null) : null;
+                $s=TelegramStore::emptyState();
+                // A draft prepared before initial BotFather setup should survive that first binding.
+                if ($draft) {$s['announcements']=TelegramAnnouncements::defaults();$s['announcements']['card']=$draft['card'];$s['announcements']['card']['schedule_enabled']=false;$s['announcements']['revision']=$draft['revision'];}
+            }
             $s['settings']=['token'=>$token,'admin_id'=>$admin,'enabled'=>false,'secret'=>$s['settings']['secret']?:bin2hex(random_bytes(32)),'username'=>$s['settings']['username']];
             $this->store->save($s);
         });

@@ -69,3 +69,9 @@ unset MTX_PASSWORD
 部署更新后的 `public`、`src` 和 Nginx 示例规则：后台新增 `/<随机入口>/admin/telegram.php`，Webhook 为 `/<随机入口>/api/telegram-webhook.php`。启用 PHP curl，允许出站访问 api.telegram.org:443；Webhook 在 CDN 上不缓存、不挑战，保留 secret 校验头。生产后台填 Token / 个人数字 ID 后启用。
 
 机器人配置和关联记录在 `storage/telegram/`，更新时保留，备份时按密钥级别保护。首次部署压缩包不携带该目录的配置和历史。详见 [Telegram 客服说明](../docs/telegram-support.md)。
+
+## 9. 机器人公告与服务器定时任务
+
+后台 → Telegram 客服 → 公告卡片。按最新 Nginx 模板增加公告页和预览脚本白名单；在生产密码后台配置群组 / 频道和本人官方入口。
+
+若启用定时发送或自动删除，按 `deploy/telegram-cron.example` 每分钟运行 `bin/telegram-tick.php`，使用与 PHP-FPM 相同的用户、私有配置和 storage。后台显示最近运行时间；脚本未运行时定时功能不执行。详见 [公告说明](../docs/telegram-announcements.md)。不要用新站 PRIVATE 包覆盖旧站数据。

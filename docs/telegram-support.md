@@ -1,6 +1,6 @@
 # Telegram 双向客服（PHP，无数据库）
 
-本功能独立于游戏 ID / 包发布，只用于用户主动联系后的客服回信，不包含群发或自动发布安装包。
+本功能独立于游戏 ID / 包发布，用于用户主动联系后的客服回信；群组 / 频道公告在独立的 [公告卡片管理页](telegram-announcements.md) 配置，不自动发布安装包。
 
 ## 工作方式
 
@@ -30,10 +30,10 @@
 
 - 地址：`/<随机入口>/api/telegram-webhook.php`，**POST JSON**，最大 256 KiB。
 - Telegram 使用 `X-Telegram-Bot-Api-Secret-Token` 头，服务端恒定时间比较；Webhook URL 不包含 Token 或 secret。
-- Nginx 使用最新 `deploy/nginx.conf.example`；新增后台 `telegram.php` 和独立的 Webhook location。已有 Nginx 配置也要同步，否则会返回 404。
+- Nginx 使用最新 `deploy/nginx.conf.example`；新增后台 `telegram.php`、`telegram-announcements.php`、公告预览脚本和独立的 Webhook location。已有 Nginx 配置也要同步，否则会返回 404。
 - CDN 对 Webhook 禁止缓存、浏览器挑战、HTML 注入和重定向；保留 POST 正文及该校验头。后台依旧按原管理规则保护。
 - 注册仅订阅 `message`，并将 `max_connections` 设为 1；应用层继续忽略群组、频道、编辑、机器人自身消息和过期消息。
-- 不需要 cron、常驻进程、数据库或开放新的服务端口。端到端 HTTPS 建议使用标准 443。
+- 双向客服本身不需要 cron；公告定时发送和自动删除另需每分钟运行 `bin/telegram-tick.php`。两者都不需要数据库或开放新的服务端口。端到端 HTTPS 建议使用标准 443。
 
 ## 存储和可靠性
 
@@ -47,7 +47,7 @@
 - 网络超时、5xx 或进程在发送中中断，可能出现“已送达但未确认”。此时标记 **结果待确认**，不盲目重发；管理员先检查 Telegram，再决定是否手工重发。外部 API 没有本服务可用的发送幂等键，本方案不承诺网络故障下恰好一次送达。
 - 用户屏蔽机器人、消息受平台限制等失败记录在后台，给管理员尽力发送提示；失败通知自身也可能发送失败。
 
-修改 Token 或管理员需先暂停。更换身份会清空旧会话/屏蔽/去重关联并更换 secret，避免旧消息 ID 串到新机器人。暂停先停止本站发送，再移除远端 Webhook；若网络异常，页面依旧显示暂停，恢复后检查远端连接。
+修改 Token 或管理员需先暂停。更换已有身份会清空旧会话/屏蔽/去重关联及公告配置并更换 secret；有待删除公告时先完成清理，避免旧消息 ID 串到新机器人。暂停先停止本站新消息发送，再移除远端 Webhook；已发公告的定时删除仍由服务器脚本执行；若网络异常，页面依旧显示暂停，恢复后检查远端连接。
 
 ## 部署包与备份
 

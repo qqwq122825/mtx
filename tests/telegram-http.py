@@ -31,6 +31,9 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
             try:request('/admin/login.php');break
             except urllib.error.URLError:time.sleep(.1)
         check(request('/admin/telegram.php')[0]==303,'bot panel requires password session')
+        check(request('/admin/telegram-announcements.php')[0]==303,'announcement panel requires password session')
+        check(request(origin+'/admin/telegram-announcements.php')[0]==404,'announcement route hidden outside mount')
+        check(request('/bin/telegram-tick.php')[0]==404,'scheduler is CLI-only, no public trigger')
         check(request('/admin/telegram.php',fields={'action':'save'})[0]==303,'unauthenticated bot changes require login')
         for path in ['/admin/telegram.php','/api/telegram-webhook.php','/storage/telegram/state.json']:
             check(request(origin+path)[0]==404,'bot routes hidden outside mount: '+path)
@@ -38,9 +41,26 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         code,html,headers=request('/admin/telegram.php');check(code==200 and headers.get('Cache-Control')=='no-store','bot panel is private and not cached')
         check(b'type="password"' in html and b'name="admin_id"' in html and (mount+'/admin/telegram.php').encode() in html,'password Token input and prefixed action')
         check(request('/admin/telegram.php',fields={'csrf':'bad','action':'save','token':'bad','admin_id':'1'})[0]==403,'bot configuration CSRF enforced')
+        ann='/admin/telegram-announcements.php'
+        code,page,headers=request(ann)
+        check(code==200 and headers.get('Cache-Control')=='no-store' and b'announcement-preview' in page,'announcement editor has uncached preview')
+        check(b'iosAs' not in page and b'name="schedule_enabled" value="1" checked' not in page and b'name="delete_enabled" value="1" checked' not in page,'third-party accounts absent and both timers default off')
+        check(request('/assets/telegram-announcements.js')[0]==200,'preview script served under mount')
+        check(request(ann,fields={'csrf':'bad','action':'pause'})[0]==403,'announcement actions require CSRF')
+        draft={'text':'**Title** <script>not-executed</script>','target':'@TestChannel','contact':'','bot_contact':'','button1_text':'Card','button1_url':'https://example.com','button2_text':'','button2_url':'','interval_minutes':'5','delete_minutes':'60','schedule_mode':'interval'}
+        check(request(ann,fields=draft|{'csrf':csrf(ann),'action':'save'})[0]==303,'save announcement draft through real HTTP')
+        page=request(ann)[1]
+        check(b'<b>Title</b>' in page and b'&lt;script&gt;not-executed&lt;/script&gt;' in page and b'<script>not-executed</script>' not in page,'server preview formats allowed emphasis and escapes HTML')
+        check(request(ann,fields=draft|{'csrf':csrf(ann),'action':'save','target':'12345'})[0]==200 and json.loads((storage/'telegram/state.json').read_text())['announcements']['card']['target']=='@TestChannel','invalid target never replaces stored draft')
+        page=request(ann,fields={'csrf':csrf(ann),'action':'test','request_id':'a'*32})[1]
+        check('请先'.encode() in page and not json.loads((storage/'telegram/state.json').read_text())['announcements']['jobs'],'unconfigured test stops before network')
         token='123456:'+secrets.token_urlsafe(32)
         check(request('/admin/telegram.php',fields={'csrf':csrf(),'action':'save','token':token,'admin_id':'77777'})[0]==303,'save fake bot configuration via POST')
         statepath=storage/'telegram/state.json';state=json.loads(statepath.read_text());secret=state['settings']['secret']
+        check(state['announcements']['card']['target']=='@TestChannel','initial bot binding preserves prepared announcement draft')
+        check(token.encode() not in request(ann)[1] and secret.encode() not in request(ann)[1],'announcement page never exposes bot secrets')
+        request(ann,fields=draft|{'csrf':csrf(ann),'action':'save','schedule_enabled':'1'})
+        check(not json.loads(statepath.read_text())['announcements']['card']['schedule_enabled'],'paused bot cannot enable announcement schedule')
         page=request('/admin/telegram.php')[1];check(token.encode() not in page and secret.encode() not in page and b'value="77777"' in page,'neither Token nor webhook secret reflected in HTML')
         check(not state['settings']['enabled'] and state['settings']['token']==token,'settings saved private and paused')
         for path in ['/storage/telegram/state.json','/telegram/state.json','/src/TelegramBot.php']:
@@ -65,5 +85,8 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         request('/admin/telegram.php',fields={'csrf':csrf(),'action':'save','token':token,'admin_id':'88888'})
         check(json.loads(statepath.read_text())['settings']['admin_id']==77777,'active binding change rejected over HTTP')
         log.flush();check(token not in (t/'server.log').read_text() and secret not in (t/'server.log').read_text(),'server log contains no bot credentials')
+        state=json.loads(statepath.read_text());state['announcements']['card']['schedule_enabled']=True;state['announcements']['next_at']=int(time.time())+3600;statepath.write_text(json.dumps(state))
+        check(request(ann,fields={'csrf':csrf(ann),'action':'pause'})[0]==303 and not json.loads(statepath.read_text())['announcements']['card']['schedule_enabled'],'pause schedule through authenticated HTTP')
+        check(request(ann,method='PUT')[0]==405,'announcement mutations accept POST only')
         print(f'\n{checks} Telegram HTTP checks passed. No external requests.')
     finally:os.killpg(proc.pid,signal.SIGTERM);proc.wait(timeout=5);log.close()

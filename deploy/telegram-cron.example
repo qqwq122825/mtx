@@ -1,0 +1,7 @@
+# Install in the PHP-FPM user's crontab (e.g. crontab -u www-data -e).
+# Replace /srv/mtx and /usr/bin/php with your actual paths; PHP CLI 8.3+ with curl/mbstring.
+# Keep config.local.php and storage readable/writable as documented.
+# For a non-default config path, put MTX_CONFIG=/private/path/config.php before /usr/bin/php.
+# stdout only contains counters. stderr reports generic configuration/storage failures.
+* * * * * cd /srv/mtx && /usr/bin/php bin/telegram-tick.php >> storage/telegram-cron.log 2>&1
+# Configure normal log rotation for storage/telegram-cron.log. Never publish storage.
