@@ -16,7 +16,7 @@ final class App
         if (function_exists('opcache_invalidate')) opcache_invalidate($path, true);
         if (!is_file($path)) throw new Problem(503, '服务尚未初始化，请先运行 bin/setup.php。', 'not_configured');
         $this->config = require $path;
-        if (!preg_match('/\A\/[a-z0-9-]{16,64}\z/D', $this->config['mount_path'] ?? '')) throw new \RuntimeException('Run bin/upgrade.php to configure private mount');
+        if (!preg_match('/\A\/[a-z0-9-]{16,64}\z/D', $this->config['mount_path'] ?? '')) throw new \RuntimeException('Invalid private mount configuration');
         $this->storage = rtrim($this->config['storage'], '/');
         $this->store = new Store($this->storage);
         if (!is_dir($this->storage . '/objects')) throw new \RuntimeException('Storage missing');
@@ -26,8 +26,7 @@ final class App
         if (PHP_SAPI !== 'cli' && !$this->config['local_http'] && (($_SERVER['HTTPS'] ?? '') !== 'on')) {
             throw new Problem(400, '请通过 HTTPS 访问。', 'https_required');
         }
-        // Backfill identities once, under the same stable lock as game creation.
-        if (!GameIds::ready($this->store->read())) $this->store->change(function (&$s) { GameIds::migrate($s); });
+        GameIds::validate($this->store->read());
     }
     public function path(string $path): string { return $this->config['mount_path'] . $path; }
     public function url(string $path): string { return rtrim($this->config['base_url'], '/') . $this->path($path); }

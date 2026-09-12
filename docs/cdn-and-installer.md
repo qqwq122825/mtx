@@ -1,10 +1,10 @@
-# 私有入口与远程安装器（0.8.2 / build 18）
+# 私有入口与远程安装器（0.8.3 / build 19）
 
 ## 路由与登录
 
 - `config.local.php` 的 `mount_path` 是随机的 `/r-` 加 24 位十六进制字符。根路径、旧 `/admin/`、旧 `/api/` 均 404，没有主页跳转或入口列表。
 - 后台是 `https://mtx.jk92.cc/<随机入口>/admin/`，只有管理密码，没有用户名。密码 hash 在服务器私有 PHP 配置校验，数据和会话写入服务器目录，不使用数据库。
-- 管理 Cookie 仅覆盖该入口的 `/admin`；所有管理动作有 CSRF 校验。旧版本升级：停站并备份配置/存储，执行 `php bin/upgrade.php` 后重载 PHP-FPM。新安装 setup 自动生成路径和两套签名密钥。
+- 管理 Cookie 仅覆盖该入口的 `/admin`；所有管理动作有 CSRF 校验。首次 setup 直接生成数字游戏 ID、随机路径和两套签名密钥。按未上线项目处理，删除旧配置/旧安装器迁移分支。
 - 随机路径会出现在安装器中，不是密码，不能防止带宽型 DDoS。上线仍需 CDN/WAF、源站防火墙、限流。
 
 ## CDN / Nginx
@@ -40,6 +40,8 @@
 响应保留 Ed25519，并增加 `native_signature_base64`：ECDSA P-256 / SHA-256，签同一份原始 JSON payload，签名 DER X9.62，公钥 X9.63。iOS 主进程和独立助手均使用 Apple Security 验证。实现参考 [Apple 签名与验证](https://developer.apple.com/documentation/security/signing-and-verifying?language=objc)、[PHP openssl_sign](https://www.php.net/openssl-sign)。下载 TIPA 与 TAR 各有签名绑定的 SHA256/长度，TAR 内 Manifest 原始字节摘要也单独签入，助手重新验证而不信任临时目录的自声明哈希。
 
 `source_bytes`、`manifest_sha256` 增补至 release；下载票据 `artifact_id` 可选择当前版本的 `source_sha256` 或 `artifact_sha256`。下架/切换发布后，源包票据与 TAR 票据一起失效。
+
+更新/票据/后台请求只接受 game_id，签名响应、票据和构建配置均没有 app_key。每个游戏只读取自己的序号缓存，不导入旧三角洲的全局序号。
 
 后台新增游戏后自动得到 ID，导出时只需选择 `--game-id`，工具自动查出其内部身份、Bundle ID 和产物契约。所有构建的 update_url 都是相同的不带查询参数的 `/api/update.php`，客户端运行时追加 game_id。不同游戏的包身份和已观察序号独立校验，混用响应或票据会被拦截。
 

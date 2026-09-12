@@ -2,7 +2,6 @@
   "example_only": true,
   "note": "仅用于协议结构示例。标识、摘要、时间均为占位数据，无有效签名，也没有部署相应文件。",
   "installer_binding": {
-    "app_key": "mtx-dfm-cn",
     "display_name": "满天星三角洲国服",
     "update_url": "https://updates.example.com/RANDOM_ENTRY/api/update.php",
     "expected_bundle_id": "com.mtx.scmtxdfm",
@@ -17,14 +16,13 @@
   },
   "request_parameters": {
     "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "installer_version": "0.8.2",
+    "installer_version": "0.8.3",
     "os_version": "16.1.2",
     "profile": "mtx-dfm-remote-v1",
     "game_id": 1
   },
   "decoded_signed_payload_example": {
     "schema_version": 1,
-    "app_key": "mtx-dfm-cn",
     "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     "issued_at": "2026-09-12T08:00:00Z",
     "expires_at": "2026-09-12T08:10:00Z",
@@ -52,7 +50,6 @@
     "game_id": 1
   },
   "future_game_binding": {
-    "app_key": "game-2",
     "display_name": "满天星暗区突围国服",
     "update_url": "https://updates.example.com/RANDOM_ENTRY/api/update.php",
     "expected_bundle_id": null,

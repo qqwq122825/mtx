@@ -51,8 +51,9 @@ class Client:
         match = re.search(r'name="csrf" value="([^"]+)"', data.decode())
         assert match, (status, data[:500])
         return html.unescape(match[1])
-    def action(self, action, key='mtx-dfm-cn', file=None, **fields):
-        values = {'csrf': self.csrf(), 'action': action, 'app_key': key, **fields}
+    def action(self, action, game_id=1, file=None, **fields):
+        values = {'csrf': self.csrf(), 'action': action, **fields}
+        if action != 'logout': values['game_id']=game_id
         return self.request('/admin/action.php', fields=values, file=file)
 
 def make_tipa(build='1', bundle='com.mtx.scmtxdfm', binary=True, extra=None, minimum='14.0'):
@@ -87,7 +88,6 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
     again = subprocess.run([PHP, str(ROOT/'bin/setup.php'), '--url', origin, '--mount', mount, '--local-http', '--password-stdin', '--config', str(config), '--storage', str(storage)], input=(PASSWORD+'\n').encode(), capture_output=True)
     check(again.returncode != 0, 'setup never overwrites configuration')
     state = lambda: json.loads((storage/'state.json').read_text())
-    legacy=state(); legacy.pop('next_game_id'); legacy['apps']['mtx-dfm-cn'].pop('game_id'); (storage/'state.json').write_text(json.dumps(legacy))
     env = os.environ | {'MTX_CONFIG': str(config), 'PHP_CLI_SERVER_WORKERS': '4'}
     log = (tmp/'server.log').open('w+')
     proc = subprocess.Popen([PHP,'-d','upload_max_filesize=256M','-d','post_max_size=260M','-d','memory_limit=256M','-S',f'127.0.0.1:{port}','-t',str(ROOT/'public'),str(ROOT/'public/router.php')],cwd=ROOT,env=env,stdout=log,stderr=log,start_new_session=True)
@@ -115,16 +115,17 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         check(status == 401, 'incorrect password rejected')
         status, _, headers = client.request('/admin/login.php', fields={'csrf':client.csrf(),'password':PASSWORD})
         check(status == 303 and headers.get('Location') == mount + '/admin/', 'correct password logs in')
-        check(state()['apps']['mtx-dfm-cn']['game_id']==1 and state()['next_game_id']==2, 'legacy catalog automatically gains stable numeric ID')
+        check(state()['apps']['mtx-dfm-cn']['game_id']==1 and state()['next_game_id']==2, 'setup initializes stable numeric ID and next counter')
         token = client.csrf()
         status, data, _ = client.request('/admin/')
         check(status == 200 and '满天星三角洲国服'.encode() in data and '尚未发布'.encode() in data, 'dashboard empty state')
+        check(b'name="game_id" value="1"' in data and b'app_key' not in data, 'admin forms and public binding expose numeric identity only')
         for path in ['/config.local.php','/storage/state.json','/vendor/autoload.php','/.git/config','/src/App.php','/router.php']:
             check(client.request(path)[0] == 404, 'private path protected: ' + path)
         check(client.request('/admin/action.php')[0] == 405, 'write endpoint rejects GET')
-        check(client.request('/admin/action.php',fields={'action':'toggle','app_key':'mtx-dfm-cn','csrf':'bad','revision':0})[0] == 403,'write CSRF enforced')
-        check(client.request('/api/update.php?app=mtx-dfm-cn')[0] == 422, 'API requires client context and nonce')
-        params = {'app':'mtx-dfm-cn','nonce':base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('='),'installer_version':'0.8.0','os_version':'16.1.2','profile':'mtx-dfm-remote-v1'}
+        check(client.request('/admin/action.php',fields={'action':'toggle','game_id':1,'csrf':'bad','revision':0})[0] == 403,'write CSRF enforced')
+        check(client.request('/api/update.php?game_id=1')[0] == 422, 'API requires client context and nonce')
+        params = {'game_id':1,'nonce':base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip('='),'installer_version':'0.8.0','os_version':'16.1.2','profile':'mtx-dfm-remote-v1'}
         def update(**overrides):
             code, raw, hdr = client.request('/api/update.php?' + urllib.parse.urlencode(params | overrides))
             assert code == 200, (code,raw)
@@ -132,15 +133,18 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
             return json.loads(base64.b64decode(envelope['payload_base64'])), envelope, hdr
         payload, envelope, _ = update()
         check(payload['status'] == 'no_release','signed no-release response')
-        check(client.request('/api/update.php?' + urllib.parse.urlencode(params|{'app':'not-found'}))[0] == 404,'unknown app rejected')
         def update_id(game_id=1, **overrides):
-            fields={k:v for k,v in params.items() if k!='app'} | {'game_id':game_id} | overrides
+            fields=params | {'game_id':game_id} | overrides
             return client.request('/api/update.php?'+urllib.parse.urlencode(fields))
         check(update_id()[0]==200 and json.loads(base64.b64decode(json.loads(update_id()[1])['payload_base64']))['game_id']==1, 'shared update endpoint resolves numeric ID')
         check(update_id(99999)[0]==404, 'unknown numeric game rejected')
         for invalid_id in ['0','-1','01','1.5','2147483648','abc']:
             check(update_id(invalid_id)[0]==422, 'invalid game ID rejected: '+invalid_id)
-        check(update_id(1, app='different-game')[0]==422, 'conflicting numeric and legacy identities rejected')
+        for field in ['app','app_key']:
+            old={k:v for k,v in params.items() if k!='game_id'} | {field:'mtx-dfm-cn'}
+            check(client.request('/api/update.php?'+urllib.parse.urlencode(old))[0]==422, 'text-only update route removed: '+field)
+            check(update_id(1, **{field:'mtx-dfm-cn'})[0]==422, 'mixed update route removed: '+field)
+        check(client.request('/api/update.php?'+urllib.parse.urlencode({k:v for k,v in params.items() if k!='game_id'}))[0]==422, 'update game ID is mandatory')
         source1 = make_tipa()
         bad_sources = [('bad.tipa',b'not a zip'),('bad.php',source1),('wrong.tipa',make_tipa(bundle='com.fixture.other')),('traversal.tipa',make_tipa(extra=('../outside',b'test'))),('duplicate.tipa',make_tipa(extra=('Payload/Fixture.app/info.plist',b'test')))]
         link = zipfile.ZipInfo('Payload/Fixture.app/link'); link.create_system = 3; link.external_attr = (0o120777 << 16)
@@ -192,10 +196,10 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         check(update(os_version='17.0')[0]['status'] == 'incompatible','unsupported OS filtered')
         check(update(os_version='14')[0]['status'] == 'version_unknown','short OS version normalized before comparison')
         numeric_payload=json.loads(base64.b64decode(json.loads(update_id()[1])['payload_base64']))
-        check(numeric_payload['game_id']==1 and numeric_payload['release']==payload['release'], 'legacy and numeric routing return same release')
+        check(numeric_payload['game_id']==1 and 'app_key' not in numeric_payload and numeric_payload['release']==payload['release'], 'signed payload uses numeric identity only')
         sha1 = hashlib.sha256(artifact1).hexdigest()
-        def ticket(rid=r1, sha=sha1, key='mtx-dfm-cn'):
-            return client.request('/api/download-ticket.php',body=json.dumps({'app_key':key,'release_id':rid,'artifact_id':sha}).encode(),headers={'Content-Type':'application/json'})
+        def ticket(rid=r1, sha=sha1, game_id=1):
+            return client.request('/api/download-ticket.php',body=json.dumps({'game_id':game_id,'release_id':rid,'artifact_id':sha}).encode(),headers={'Content-Type':'application/json'})
         check(payload['release']['source_bytes']==len(source1), 'signed source length included')
         check(len(payload['release']['manifest_sha256'])==64, 'signed prepared manifest digest included')
         code, source_ticket, _ = ticket(sha=hashlib.sha256(source1).hexdigest())
@@ -206,8 +210,12 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         code, data, _ = ticket()
         check(code == 200,'download ticket issued')
         numeric_ticket=client.request('/api/download-ticket.php',body=json.dumps({'game_id':1,'release_id':r1,'artifact_id':sha1}).encode(),headers={'Content-Type':'application/json'})
-        check(numeric_ticket[0]==200 and json.loads(numeric_ticket[1])['game_id']==1, 'numeric ID download ticket')
-        check(client.request('/api/download-ticket.php',body=json.dumps({'game_id':1,'app_key':'different-game','release_id':r1,'artifact_id':sha1}).encode(),headers={'Content-Type':'application/json'})[0]==422, 'conflicting ticket identity rejected')
+        check(numeric_ticket[0]==200 and json.loads(numeric_ticket[1])['game_id']==1 and 'app_key' not in json.loads(numeric_ticket[1]), 'numeric ID download ticket')
+        for field in ['app','app_key']:
+            for numeric in [{},{'game_id':1}]:
+                body=numeric | {field:'mtx-dfm-cn','release_id':r1,'artifact_id':sha1}
+                check(client.request('/api/download-ticket.php',body=json.dumps(body).encode(),headers={'Content-Type':'application/json'})[0]==422, 'textual ticket route removed: '+field+str(bool(numeric)))
+        check(client.request('/api/download-ticket.php',body=json.dumps({'release_id':r1,'artifact_id':sha1}).encode(),headers={'Content-Type':'application/json'})[0]==422, 'ticket game ID is mandatory')
         download_url = json.loads(data)['url']
         code, downloaded, hdr = client.request(download_url)
         check(code == 200 and downloaded == artifact1,'full download matches exact artifact bytes')
@@ -249,46 +257,52 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         check(client.action('publish',release_id=r3,revision=3,confirmed=1)[0] == 303 and state()['releases'][r3]['sequence']==3,'republish old bytes uses increasing sequence')
         check(client.action('toggle',revision=4)[0] == 303 and update()[0]['status']=='no_release','disabled game stops updates')
         check(client.action('toggle',revision=5)[0] == 303,'game re-enabled')
-        code,_,_=client.action('create',key='fixture-other',name='其他测试游戏',bundle_id='com.fixture.other',format='tipa',profile_id='fixture-tipa-v1')
+        code,_,_=client.action('create',game_id=2,name='其他测试游戏',bundle_id='com.fixture.other',format='tipa')
         check(code == 303,'new game can be created')
-        check(client.action('upload',key='fixture-other',file=('wrong.tipa',source1),min_installer_version='0.8.0',max_ios='16.6.1',changelog='test')[0] == 422,'cross-game source rejected')
-        check(client.action('withdraw',key='fixture-other',release_id=r3,revision=0)[0] == 404,'cross-game action rejected')
-        check(ticket(rid=r3,key='fixture-other')[0] == 404,'cross-game download rejected')
+        check(client.action('upload',game_id=2,file=('wrong.tipa',source1),min_installer_version='0.8.0',max_ios='16.6.1',changelog='test')[0] == 422,'cross-game source rejected')
+        check(client.action('withdraw',game_id=2,release_id=r3,revision=0)[0] == 404,'cross-game action rejected')
+        check(ticket(rid=r3,game_id=2)[0] == 404,'cross-game download rejected')
         rawother=make_tipa(bundle='com.fixture.other')
-        check(client.action('upload',key='fixture-other',file=('other.tipa',rawother),min_installer_version='0.8.0',max_ios='16.6.1',changelog='raw mode')[0] == 200,'raw TIPA mode upload')
-        other=next(r for r,v in state()['releases'].items() if v['app_key']=='fixture-other')
+        check(client.action('upload',game_id=2,file=('other.tipa',rawother),min_installer_version='0.8.0',max_ios='16.6.1',changelog='raw mode')[0] == 200,'raw TIPA mode upload')
+        other=next(r for r,v in state()['releases'].items() if v['app_key']=='game-2')
         check(state()['releases'][other]['state']=='ready','raw mode has no TAR requirement')
-        check(client.action('publish',key='fixture-other',release_id=other,revision=0,confirmed=1)[0] == 303,'raw TIPA mode publish')
+        check(client.action('publish',game_id=2,release_id=other,revision=0,confirmed=1)[0] == 303,'raw TIPA mode publish')
         # Different version IDs contend for the same expected revision: exactly one wins.
-        check(client.action('create',key='fixture-race',name='并发测试',bundle_id='com.fixture.race',format='tipa',profile_id='fixture-race-v1')[0] == 303,'concurrent test game created')
+        check(client.action('create',game_id=3,name='并发测试',bundle_id='com.fixture.race',format='tipa')[0] == 303,'concurrent test game created')
         for build in ['1','2']:
-            check(client.action('upload',key='fixture-race',file=('race.tipa',make_tipa(build=build,bundle='com.fixture.race')),min_installer_version='0.8.0',max_ios='16.6.1',changelog='race test')[0] == 200,'race release uploaded '+build)
-        racers=[rid for rid,r in state()['releases'].items() if r['app_key']=='fixture-race']
+            check(client.action('upload',game_id=3,file=('race.tipa',make_tipa(build=build,bundle='com.fixture.race')),min_installer_version='0.8.0',max_ios='16.6.1',changelog='race test')[0] == 200,'race release uploaded '+build)
+        racers=[rid for rid,r in state()['releases'].items() if r['app_key']=='game-3']
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            codes=list(pool.map(lambda pair:pair[0].action('publish',key='fixture-race',release_id=pair[1],revision=0,confirmed=1)[0],zip(clients,racers)))
-        check(sorted(codes)==[303,409] and state()['apps']['fixture-race']['next_sequence']==2,'distinct concurrent releases have one winner')
+            codes=list(pool.map(lambda pair:pair[0].action('publish',game_id=3,release_id=pair[1],revision=0,confirmed=1)[0],zip(clients,racers)))
+        check(sorted(codes)==[303,409] and state()['apps']['game-3']['next_sequence']==2,'distinct concurrent releases have one winner')
         ready=next(rid for rid in racers if state()['releases'][rid]['state']=='ready')
         sha=state()['releases'][ready]['artifact_sha256']; obj=storage/'objects'/sha; original=obj.read_bytes(); obj.write_bytes(b'corrupt')
-        check(client.action('publish',key='fixture-race',release_id=ready,revision=1,confirmed=1)[0] == 409 and state()['apps']['fixture-race']['revision']==1,'corrupt stored artifact never published and state unchanged')
+        check(client.action('publish',game_id=3,release_id=ready,revision=1,confirmed=1)[0] == 409 and state()['apps']['game-3']['revision']==1,'corrupt stored artifact never published and state unchanged')
         obj.write_bytes(original)
         before=state()['next_game_id']
-        check(client.action('create',key='',name='自动 ID 游戏',bundle_id='com.fixture.auto',format='prepared-payload-v1',game_id='99999')[0]==303, 'game creation needs no manually chosen key or profile')
+        check(client.action('create',name='自动 ID 游戏',bundle_id='com.fixture.auto',format='prepared-payload-v1',game_id='99999')[0]==303, 'game creation needs no manually chosen key or profile')
         auto=next(g for g in state()['apps'].values() if g['game_id']==before)
         check(auto['app_key']=='game-'+str(before) and auto['profile_id']==auto['app_key']+'-remote-v1', 'server generates stable internal binding and ignores requested ID')
-        check(client.request('/admin/?game_id='+str(before))[0]==200 and client.request('/admin/?game_id='+str(before)+'&app=mtx-dfm-cn')[0]==422, 'admin uses numeric ID and rejects conflicting identities')
-        duplicate=client.action('create',key=auto['app_key'],name='重复',bundle_id='com.fixture.duplicate',format='prepared-payload-v1')[0]
-        check(duplicate==409 and state()['next_game_id']==before+1, 'failed duplicate creation does not consume ID')
-        check(client.action('toggle',key=auto['app_key'],revision=0)[0]==303 and state()['apps'][auto['app_key']]['game_id']==before, 'disabling game preserves ID')
+        check(client.request('/admin/?game_id='+str(before))[0]==200 and client.request('/admin/?game_id='+str(before)+'&app=mtx-dfm-cn')[0]==422, 'admin uses numeric ID and rejects textual parameters')
+        duplicate=client.action('create',app_key=auto['app_key'],name='重复',bundle_id='com.fixture.duplicate',format='prepared-payload-v1')[0]
+        check(duplicate==422 and state()['next_game_id']==before+1, 'removed explicit-key creation leaves counter unchanged')
+        check(client.action('toggle',game_id=before,revision=0)[0]==303 and state()['apps'][auto['app_key']]['game_id']==before, 'disabling game preserves ID')
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            codes=list(pool.map(lambda pair:pair[1].action('create',key='',name='并发自动 ID '+str(pair[0]),bundle_id='com.fixture.auto'+str(pair[0]),format='prepared-payload-v1')[0],enumerate(clients)))
+            codes=list(pool.map(lambda pair:pair[1].action('create',name='并发自动 ID '+str(pair[0]),bundle_id='com.fixture.auto'+str(pair[0]),format='prepared-payload-v1')[0],enumerate(clients)))
         current=state();ids=[g['game_id'] for g in current['apps'].values()]
         check(codes==[303,303] and len(ids)==len(set(ids)) and current['next_game_id']==before+3, 'concurrent game creation allocates distinct IDs under lock')
-        old_ids={k:g['game_id'] for k,g in current['apps'].items()}
-        upgraded=subprocess.run([PHP,str(ROOT/'bin/upgrade.php')],env=env,capture_output=True)
-        check(upgraded.returncode==0 and old_ids=={k:g['game_id'] for k,g in state()['apps'].items()}, 'repeated migration preserves all game IDs')
+        snapshot=(storage/'state.json').read_bytes()
+        check(client.request('/admin/')[0]==200 and (storage/'state.json').read_bytes()==snapshot, 'normal reads do not migrate or rewrite catalog')
+        malformed=state(); malformed['apps']['mtx-dfm-cn'].pop('game_id'); (storage/'state.json').write_text(json.dumps(malformed)); bad_bytes=(storage/'state.json').read_bytes()
+        check(client.request('/admin/')[0]==500 and (storage/'state.json').read_bytes()==bad_bytes, 'missing stored ID fails without automatic migration')
+        (storage/'state.json').write_bytes(snapshot)
+        for field in ['app','app_key']:
+            check(client.request('/admin/?'+field+'=mtx-dfm-cn')[0]==422, 'textual admin route removed: '+field)
+            check(client.request('/admin/action.php',fields={'csrf':client.csrf(),'action':'toggle',field:'mtx-dfm-cn','revision':6})[0]==422, 'textual admin write removed: '+field)
+        check(client.action('create',name='test',bundle_id='com.fixture.oldprofile',format='tipa',profile_id='manual-v1')[0]==422, 'creation does not accept manually assigned profile')
         exported=tmp/'game.h'
         result=subprocess.run([PHP,str(ROOT/'bin/export-installer.php'),'--url','https://updates.example.com','--game-id',str(before),'--out',str(exported)],env=env,capture_output=True)
-        check(result.returncode==0 and f'MTX_REMOTE_GAME_ID @{before}' in exported.read_text() and '?app=' not in exported.read_text() and auto['bundle_id'] in exported.read_text(), 'ID build export fills identity and shared endpoint')
+        check(result.returncode==0 and f'MTX_REMOTE_GAME_ID @{before}' in exported.read_text() and '?app=' not in exported.read_text() and 'MTX_REMOTE_APP_KEY' not in exported.read_text() and auto['bundle_id'] in exported.read_text(), 'ID build export fills identity and shared endpoint')
         check(client.action('logout')[0] == 303 and client.request('/admin/')[0]==303,'logout clears access')
         for attempt in range(5):
             check(client.request('/admin/login.php',fields={'csrf':client.csrf(),'password':'bad'})[0] == 401,f'wrong password attempt {attempt+1}')

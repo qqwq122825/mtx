@@ -10,7 +10,7 @@ $client=Packages::version(Http::text($_GET,'installer_version',12));
 $os=Packages::version(Http::text($_GET,'os_version',12));
 $profile=Http::text($_GET,'profile',80);
 $installed=isset($_GET['installed_sequence'])?Http::integer($_GET,'installed_sequence'):null;
-$s=$app->store->read(); $g=GameIds::resolve($s,$_GET,'app'); $key=$g['app_key'];
+$s=$app->store->read(); $g=GameIds::resolve($s,$_GET); $key=$g['app_key'];
 $status='no_release'; $message='此游戏暂无已发布版本。'; $wire=null;
 if ($g['enabled'] && $g['current_release_id']) {
     $r=Releases::release($s,$g['current_release_id'],$key);
@@ -25,4 +25,4 @@ if ($g['enabled'] && $g['current_release_id']) {
         }
     }
 }
-Http::json(Security::sign($app,['schema_version'=>1,'game_id'=>$g['game_id'],'app_key'=>$key,'nonce'=>$nonce,'issued_at'=>gmdate('c'),'expires_at'=>gmdate('c',time()+600),'status'=>$status,'message'=>$message,'release'=>$wire]));
+Http::json(Security::sign($app,['schema_version'=>1,'game_id'=>$g['game_id'],'nonce'=>$nonce,'issued_at'=>gmdate('c'),'expires_at'=>gmdate('c',time()+600),'status'=>$status,'message'=>$message,'release'=>$wire]));

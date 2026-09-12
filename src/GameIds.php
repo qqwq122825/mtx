@@ -12,7 +12,7 @@ final class GameIds
     }
     public static function ready(array $s): bool
     {
-        if (!is_int($s['next_game_id']??null) || $s['next_game_id']<1 || $s['next_game_id']>self::MAX_ID+1) return false;
+        if (!is_array($s['apps']??null) || !is_int($s['next_game_id']??null) || $s['next_game_id']<1 || $s['next_game_id']>self::MAX_ID+1) return false;
         $seen=[];
         foreach ($s['apps'] as $g) {
             $id=$g['game_id']??null;
@@ -21,27 +21,13 @@ final class GameIds
         }
         return true;
     }
-    public static function migrate(array &$s): void
+    public static function validate(array $s): void
     {
-        $used=[]; $highest=0;
-        foreach ($s['apps'] as &$g) if (isset($g['game_id'])) {
-            $id=self::parse($g['game_id']); $g['game_id']=$id;
-            if (isset($used[$id])) throw new \RuntimeException('Duplicate stored game ID; restore consistent state');
-            $used[$id]=true; $highest=max($highest,$id);
-        }
-        unset($g);
-        $next=$s['next_game_id']??1;
-        if (!is_int($next) || $next<1 || $next>self::MAX_ID+1) throw new \RuntimeException('Invalid game ID counter');
-        $next=max($next,$highest+1);
-        foreach ($s['apps'] as &$g) if (!isset($g['game_id'])) {
-            if ($next>self::MAX_ID) throw new Problem(503,'游戏 ID 已用尽。');
-            $g['game_id']=$next++;
-        }
-        $s['next_game_id']=$next;
+        if (!self::ready($s)) throw new \RuntimeException('Invalid game ID catalog; restore consistent state');
     }
     public static function allocate(array &$s): int
     {
-        self::migrate($s);
+        self::validate($s);
         if ($s['next_game_id']>self::MAX_ID) throw new Problem(503,'游戏 ID 已用尽。');
         return $s['next_game_id']++;
     }
@@ -50,15 +36,14 @@ final class GameIds
         foreach ($s['apps'] as $g) if (($g['game_id']??null)===$id) return $g;
         throw new Problem(404,'游戏 ID 不存在。','app_not_found');
     }
-    public static function resolve(array $s,array $input,string $legacyField): array
+    public static function rejectLegacyFields(array $input): void
     {
-        $legacy=Http::text($input,$legacyField,60);
-        if (array_key_exists('game_id',$input)) {
-            $g=self::byId($s,self::parse($input['game_id']));
-            if ($legacy!=='' && $legacy!==$g['app_key']) throw new Problem(422,'游戏 ID 与旧标识不匹配。','game_identity_conflict');
-            return $g;
-        }
-        if ($legacy==='') throw new Problem(422,'请指定游戏 ID。','missing_game_id');
-        return Releases::game($s,$legacy); // Existing installers remain compatible.
+        if (array_key_exists('app',$input) || array_key_exists('app_key',$input)) throw new Problem(422,'游戏参数只接受 game_id。','unsupported_game_parameter');
+    }
+    public static function resolve(array $s,array $input): array
+    {
+        self::rejectLegacyFields($input);
+        if (!array_key_exists('game_id',$input)) throw new Problem(422,'请指定游戏 ID。','missing_game_id');
+        return self::byId($s,self::parse($input['game_id']));
     }
 }

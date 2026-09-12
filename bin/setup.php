@@ -32,8 +32,7 @@ try {
     if (!preg_match('/\A\/[a-z0-9-]{16,64}\z/D',$mount)) throw new RuntimeException('mount 应为 / 加 16–64 位小写字母、数字或连字符。');
     $pair=sodium_crypto_sign_keypair();
     $config=MTX\Security::nativeKeys()+['mount_path'=>$mount,'base_url'=>$url,'local_http'=>$local,'storage'=>realpath($storage),'password_hash'=>password_hash($password,PASSWORD_DEFAULT),'max_upload_bytes'=>268435456,'key_id'=>'mtx-release-1','sign_secret'=>base64_encode(sodium_crypto_sign_secretkey($pair)),'sign_public'=>base64_encode(sodium_crypto_sign_publickey($pair)),'ticket_secret'=>bin2hex(random_bytes(32))];
-    $state=['schema'=>1,'apps'=>['mtx-dfm-cn'=>['app_key'=>'mtx-dfm-cn','name'=>'满天星三角洲国服','bundle_id'=>'com.mtx.scmtxdfm','format'=>'prepared-payload-v1','profile_id'=>'mtx-dfm-remote-v1','enabled'=>true,'current_release_id'=>null,'next_sequence'=>1,'revision'=>0]],'releases'=>[],'audit'=>[]];
-    MTX\GameIds::migrate($state);
+    $state=['schema'=>1,'next_game_id'=>2,'apps'=>['mtx-dfm-cn'=>['game_id'=>1,'app_key'=>'mtx-dfm-cn','name'=>'满天星三角洲国服','bundle_id'=>'com.mtx.scmtxdfm','format'=>'prepared-payload-v1','profile_id'=>'mtx-dfm-remote-v1','enabled'=>true,'current_release_id'=>null,'next_sequence'=>1,'revision'=>0]],'releases'=>[],'audit'=>[]];
     Store::write($storage.'/state.json',json_encode($state,JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR)."\n");
     Store::write($path,"<?php\n// Private server-only configuration. Keep outside public and Git.\nreturn ".var_export($config,true).";\n");
     fwrite(STDOUT,"初始化完成：{$url}{$mount}/admin/\n配置：$path\n所有数据保存在：$storage\n");

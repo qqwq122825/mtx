@@ -97,8 +97,8 @@
              self.assertEqual(settings['PRODUCT_BUNDLE_IDENTIFIER'], 'com.mtx.installer')
 -            self.assertEqual(settings['MARKETING_VERSION'], '0.7.1')
 -            self.assertEqual(str(settings['CURRENT_PROJECT_VERSION']), '15')
-+            self.assertEqual(settings['MARKETING_VERSION'], '0.8.2')
-+            self.assertEqual(str(settings['CURRENT_PROJECT_VERSION']), '18')
++            self.assertEqual(settings['MARKETING_VERSION'], '0.8.3')
++            self.assertEqual(str(settings['CURRENT_PROJECT_VERSION']), '19')
  
      def test_shared_scheme_packages_after_build_and_archive(self):
          scheme = ET.parse(ROOT / 'TrollInstallerX.xcodeproj/xcshareddata/xcschemes/TrollInstallerX.xcscheme').getroot()
@@ -153,7 +153,7 @@
  
 --- /dev/null
 +++ b/Tests/test_remote_update.py
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,52 @@
 +from pathlib import Path
 +import unittest
 +ROOT=Path(__file__).resolve().parents[1]
@@ -198,6 +198,14 @@
 +        self.assertIn('MTXMatchesRemoteGameID(p[@"game_id"])',verify)
 +        self.assertIn('MTXMatchesRemoteGameID(ticket["game_id"])',download)
 +        self.assertIn('MTXRemoteMaxSequence.game.',download)
++
++    def test_only_numeric_identity_without_legacy_sequence_import(self):
++        download=(ROOT/'TrollInstallerX/Installer/MTXRemoteUpdater.swift').read_text()
++        verify=(ROOT/'TrollInstallerX/Installer/MTXRemoteVerification.inc').read_text()
++        self.assertNotIn('MTXRemoteAppKey',download+verify)
++        self.assertNotIn('MTX_REMOTE_APP_KEY',verify)
++        self.assertNotIn('forKey: "MTXRemoteMaxSequence"',download)
++        self.assertNotIn('mtx-dfm-cn',download+verify)
 --- a/Tools/package_installer.sh
 +++ b/Tools/package_installer.sh
 @@ -22,10 +22,10 @@
@@ -282,7 +290,7 @@
  				CODE_SIGN_IDENTITY = "";
  				CODE_SIGN_STYLE = Manual;
 -				CURRENT_PROJECT_VERSION = 15;
-+				CURRENT_PROJECT_VERSION = 18;
++				CURRENT_PROJECT_VERSION = 19;
  				DEVELOPMENT_ASSET_PATHS = "\"TrollInstallerX/Preview Content\"";
  				DEVELOPMENT_TEAM = "";
  				ENABLE_PREVIEWS = YES;
@@ -291,7 +299,7 @@
  					"$(PROJECT_DIR)/TrollInstallerX/External/lib",
  				);
 -				MARKETING_VERSION = 0.7.1;
-+				MARKETING_VERSION = 0.8.2;
++				MARKETING_VERSION = 0.8.3;
  				PRODUCT_BUNDLE_IDENTIFIER = com.mtx.installer;
  				PRODUCT_NAME = MTXInstaller;
  				EXECUTABLE_NAME = MTXInstaller;
@@ -300,7 +308,7 @@
  				CODE_SIGN_IDENTITY = "";
  				CODE_SIGN_STYLE = Manual;
 -				CURRENT_PROJECT_VERSION = 15;
-+				CURRENT_PROJECT_VERSION = 18;
++				CURRENT_PROJECT_VERSION = 19;
  				DEVELOPMENT_ASSET_PATHS = "\"TrollInstallerX/Preview Content\"";
  				DEVELOPMENT_TEAM = "";
  				ENABLE_PREVIEWS = YES;
@@ -309,7 +317,7 @@
  					"$(PROJECT_DIR)/TrollInstallerX/External/lib",
  				);
 -				MARKETING_VERSION = 0.7.1;
-+				MARKETING_VERSION = 0.8.2;
++				MARKETING_VERSION = 0.8.3;
  				PRODUCT_BUNDLE_IDENTIFIER = com.mtx.installer;
  				PRODUCT_NAME = MTXInstaller;
  				EXECUTABLE_NAME = MTXInstaller;
@@ -456,7 +464,7 @@
  static double MonotonicSeconds(void) {
 --- a/TrollInstallerX/Installer/MTXHostInstaller.h
 +++ b/TrollInstallerX/Installer/MTXHostInstaller.h
-@@ -2,6 +2,13 @@
+@@ -2,6 +2,12 @@
  
  NS_ASSUME_NONNULL_BEGIN
  NSString *MTXArchiveSHA256(void);
@@ -464,13 +472,12 @@
 +NSInteger MTXRemoteGameID(void);
 +NSString *MTXRemoteGameName(void);
 +BOOL MTXMatchesRemoteGameID(id _Nullable identifier);
-+NSString *MTXRemoteAppKey(void);
 +NSString *MTXRemoteProfile(void);
 +NSDictionary * _Nullable MTXVerifyRemoteEnvelope(NSData *envelope, NSString * _Nullable nonce, NSError * _Nullable * _Nullable error);
  NSString * _Nullable MTXFileSHA256(NSString *path);
  // Immutable, eagerly read bytes. Do not reopen the app's data container after
  // the process credentials change. No file-backed mmap or delayed path reads.
-@@ -10,6 +17,8 @@
+@@ -10,6 +16,8 @@
  + (instancetype)new NS_UNAVAILABLE;
  @end
  MTXPreparedPayload * _Nullable MTXLoadPreparedPayload(NSString *preparedPath, NSError * _Nullable * _Nullable error);
@@ -627,7 +634,7 @@
  NSString *MTXValidatePreparedPayload(NSString *preparedPath) {
 --- /dev/null
 +++ b/TrollInstallerX/Installer/MTXRemoteUpdater.swift
-@@ -0,0 +1,278 @@
+@@ -0,0 +1,270 @@
 +import Foundation
 +import CryptoKit
 +import Security
@@ -720,15 +727,7 @@
 +    private let defaults: UserDefaults
 +    private let fm = FileManager.default
 +    private var sequenceKey: String { "MTXRemoteMaxSequence.game.\(MTXRemoteGameID())" }
-+    private var highestSequence: Int {
-+        var highest = defaults.integer(forKey: sequenceKey)
-+        // v0.8.0/v0.8.1 supported only the original DFM build. Carry its
-+        // observed sequence forward without blocking another game's fresh ID.
-+        if MTXRemoteGameID() == 1 && MTXRemoteAppKey() == "mtx-dfm-cn" {
-+            highest = max(highest, defaults.integer(forKey: "MTXRemoteMaxSequence"))
-+        }
-+        return highest
-+    }
++    private var highestSequence: Int { defaults.integer(forKey: sequenceKey) }
 +    private let installerVersion: String
 +    private let osVersion: String
 +    private let progress: (MTXDownloadProgress) -> Void
@@ -815,7 +814,7 @@
 +        let ticketURL = endpoint.deletingLastPathComponent().appendingPathComponent("download-ticket.php")
 +        let raw = try json(ticketURL, body: ["game_id": String(MTXRemoteGameID()), "release_id": r["release_id"] as! String, "artifact_id": sha])
 +        guard let ticket = try JSONSerialization.jsonObject(with: raw) as? [String: Any],
-+              MTXMatchesRemoteGameID(ticket["game_id"]), ticket["app_key"] as? String == MTXRemoteAppKey(), ticket["release_id"] as? String == r["release_id"] as? String,
++              MTXMatchesRemoteGameID(ticket["game_id"]), ticket["release_id"] as? String == r["release_id"] as? String,
 +              ticket["artifact_id"] as? String == sha, let text = ticket["url"] as? String,
 +              let url = URL(string: text), permitted(url), url.lastPathComponent == "download.php" else { throw downloadFailure("下载地址校验失败，请重试。") }
 +        let temporary = directory.appendingPathComponent(UUID().uuidString + ".part")
@@ -908,7 +907,7 @@
 +}
 --- /dev/null
 +++ b/TrollInstallerX/Installer/MTXRemoteVerification.inc
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,66 @@
 +// Native verification is shared by the UI process and the one-shot helper.
 +// PHP: ECDSA P-256 / SHA-256, DER X9.62 signature over original payload bytes.
 +#import <Security/Security.h>
@@ -923,7 +922,6 @@
 +    return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID() &&
 +        [value doubleValue] == [value longLongValue] && [value isEqual:MTX_REMOTE_GAME_ID];
 +}
-+NSString *MTXRemoteAppKey(void) { return MTX_REMOTE_APP_KEY; }
 +NSString *MTXRemoteProfile(void) { return MTX_REMOTE_PROFILE; }
 +static BOOL RemoteHex(id value, NSUInteger length) {
 +    return [value isKindOfClass:NSString.class] && [value length] == length &&
@@ -956,7 +954,7 @@
 +    if (!valid) REMOTE_FAIL("更新信息校验失败，请稍后重试。");
 +    id p = [NSJSONSerialization JSONObjectWithData:raw options:0 error:NULL];
 +    if (![p isKindOfClass:NSDictionary.class] || ![p[@"schema_version"] isEqual:@1] ||
-+        !MTXMatchesRemoteGameID(p[@"game_id"]) || ![p[@"app_key"] isEqual:MTX_REMOTE_APP_KEY] || (nonce && ![p[@"nonce"] isEqual:nonce])) REMOTE_FAIL("更新身份或请求校验失败。");
++        !MTXMatchesRemoteGameID(p[@"game_id"]) || (nonce && ![p[@"nonce"] isEqual:nonce])) REMOTE_FAIL("更新身份或请求校验失败。");
 +    if (![p[@"issued_at"] isKindOfClass:NSString.class] || ![p[@"expires_at"] isKindOfClass:NSString.class]) REMOTE_FAIL("更新有效期缺失。");
 +    NSISO8601DateFormatter *formatter = [NSISO8601DateFormatter new];
 +    NSDate *issued = [formatter dateFromString:p[@"issued_at"]], *expires = [formatter dateFromString:p[@"expires_at"]];

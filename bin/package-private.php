@@ -19,7 +19,7 @@ $zip->addEmptyDir('storage');$zip->addEmptyDir('storage/objects');$zip->addEmpty
 foreach(['storage/','storage/objects/','storage/sessions/'] as $dir)$zip->setExternalAttributesName($dir,ZipArchive::OPSYS_UNIX,0040700<<16);
 // Carry the game catalog and monotonic ID counter, but no releases/files/audit.
 $catalog=(new MTX\Store((require getenv('MTX_CONFIG')?:$root.'/config.local.php')['storage']))->read();
-MTX\GameIds::migrate($catalog);
+MTX\GameIds::validate($catalog);
 $state=['schema'=>1,'next_game_id'=>$catalog['next_game_id'],'apps'=>$catalog['apps'],'releases'=>[],'audit'=>[]];
 foreach ($state['apps'] as &$game) { $game['current_release_id']=null; $game['next_sequence']=1; $game['revision']=0; }
 unset($game);

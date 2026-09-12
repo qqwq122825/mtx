@@ -1,14 +1,16 @@
 <?php
 declare(strict_types=1);
 if (!defined('MTX_FRONT_CONTROLLER')) { http_response_code(404); exit; }
-use MTX\{Http,Security,Releases,Problem,Store};
+use MTX\{Http,Security,Releases,Problem,GameIds};
 $app=require dirname(__DIR__,2).'/src/bootstrap.php';
 Http::method('POST'); Security::session($app);
 $ajax=($_SERVER['HTTP_X_MTX_UPLOAD']??'')==='1';
 try {
     if (!Security::loggedIn($app)) throw new Problem(401,'登录已过期，请重新登录。');
     Security::csrf();
-    $action=Http::text($_POST,'action',30); $key=Http::text($_POST,'app_key',60);
+    GameIds::rejectLegacyFields($_POST);
+    $action=Http::text($_POST,'action',30);
+    $key=in_array($action,['create','logout'],true)?'':GameIds::resolve($app->store->read(),$_POST)['app_key'];
     $service=new Releases($app);
     switch ($action) {
         case 'logout': $_SESSION=[]; session_destroy(); Http::redirect($app->path('/admin/login.php'));

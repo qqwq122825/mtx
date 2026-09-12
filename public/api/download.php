@@ -24,7 +24,7 @@ if ($range!=='' && (!isset($_SERVER['HTTP_IF_RANGE']) || $_SERVER['HTTP_IF_RANGE
 }
 http_response_code($status);
 header('Content-Type: application/octet-stream'); header('Cache-Control: private, no-store'); header('Accept-Ranges: bytes'); header('ETag: '.$etag);
-header('Content-Disposition: attachment; filename="'.$g['app_key'].'-'.$r['sequence'].($sha===$r['source_sha256']?'.tipa':'.tar').'"');
+header('Content-Disposition: attachment; filename="game-'.$g['game_id'].'-'.$r['sequence'].($sha===$r['source_sha256']?'.tipa':'.tar').'"');
 header('Content-Length: '.($end-$start+1));
 if ($_SERVER['REQUEST_METHOD']==='HEAD') { fclose($h); exit; }
 set_time_limit(0); fseek($h,$start); $left=$end-$start+1;

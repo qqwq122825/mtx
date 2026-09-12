@@ -21,23 +21,18 @@ final class Releases
     }
     public function createGame(array $input): string
     {
-        $key = Http::text($input, 'app_key', 60);
-        if ($key!=='' && !preg_match('/\A[a-z][a-z0-9-]{2,59}\z/', $key)) throw new Problem(422, '固定标识使用 3–60 位小写字母、数字和连字符。');
+        GameIds::rejectLegacyFields($input);
+        if (array_key_exists('profile_id',$input)) throw new Problem(422,'产物契约由后台自动生成。');
         $bundle = Http::text($input, 'bundle_id', 180);
         if (!preg_match('/\A[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\z/', $bundle)) throw new Problem(422, '请输入正确的 Bundle ID。');
         $format = Http::text($input, 'format', 40);
         if (!in_array($format, ['tipa','prepared-payload-v1'], true)) throw new Problem(422, '分发格式无效。');
         $name = Packages::label(Http::text($input, 'name', 120), 120);
-        $profile = Http::text($input, 'profile_id', 80);
-        if ($profile!=='' && !preg_match('/\A[a-z0-9][a-z0-9-]{2,79}\z/', $profile)) throw new Problem(422, '产物契约标识格式异常。');
-        return $this->app->store->change(function (&$s) use ($key,$bundle,$format,$name,$profile) {
+        return $this->app->store->change(function (&$s) use ($bundle,$format,$name) {
             $id=GameIds::allocate($s);
-            if ($key==='') {
-                $key='game-'.$id;
-                while (isset($s['apps'][$key])) { $id=GameIds::allocate($s); $key='game-'.$id; }
-            }
-            if ($profile==='') $profile=$key.'-remote-v1';
-            if (isset($s['apps'][$key])) throw new Problem(409, '此游戏标识已存在。');
+            $key='game-'.$id;
+            if (isset($s['apps'][$key])) throw new \RuntimeException('Game ID storage collision');
+            $profile=$key.'-remote-v1';
             $s['apps'][$key] = ['game_id'=>$id,'app_key'=>$key,'name'=>$name,'bundle_id'=>$bundle,'format'=>$format,'profile_id'=>$profile,'enabled'=>true,'current_release_id'=>null,'next_sequence'=>1,'revision'=>0];
             Store::audit($s, '新增游戏配置', '#'.$id.' / '.$key);
             return $key;
