@@ -224,8 +224,12 @@ final class TelegramBot
                     }
                 } elseif (!$this->supported($m)) $send('command',$peer,'目前支持文字、图片、文件、语音、视频或贴纸，请换一种消息格式。');
                 else {
-                    $name=mb_substr(preg_replace('/[\x00-\x1f\x7f]/u',' ',is_string($m['from']['first_name']??null)?$m['from']['first_name']:'用户'),0,80);
-                    $heading=$send('heading',$c['admin_id'],'客服消息 · #'.$peer."\n".$name."\n请回复这张卡片或下方消息。",$peer);
+                    $name=trim(mb_substr(preg_replace('/[\x00-\x1f\x7f\p{Cf}\p{Zl}\p{Zp}]/u',' ',is_string($m['from']['first_name']??null)?$m['from']['first_name']:'用户'),0,80))?:'用户';
+                    // Display the actual sender's current handle, never a forwarded author;
+                    // reply routes and permissions continue to use immutable numeric IDs.
+                    $username=$m['from']['username']??null;
+                    $handle=is_string($username) && preg_match('/\A[A-Za-z0-9_]{1,64}\z/D',$username)?'@'.$username:'未设置用户名';
+                    $heading=$send('heading',$c['admin_id'],'客服消息 · #'.$peer."\n昵称：".$name."\n用户名：".$handle."\n请回复这张卡片或下方消息。",$peer);
                     $this->step($s,$id,'incoming','copyMessage',['chat_id'=>$c['admin_id'],'from_chat_id'=>$peer,'message_id'=>$m['message_id'],'reply_parameters'=>['message_id'=>$heading['message_id'],'allow_sending_without_reply'=>true]],$peer);
                     // Only acknowledge a confirmed copy. Reserve the cooldown before sending;
                     // a 429 resumes this same step, an ambiguous send is never repeated.

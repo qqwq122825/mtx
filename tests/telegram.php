@@ -76,12 +76,14 @@ try {
         check(TelegramReplies::read($bot->store->read())===$custom,'invalid edit leaves prior templates intact');
     }
     $bot->saveReplies($defaults);
-    $u=$message($a);$out=$deliver($u);$routes=$bot->store->read()['routes'];$aCopy=array_key_last($routes);$aHeading=$aCopy-1;
+    $u=$message($a,['from'=>['username'=>'FIXTURE_PERSONAL_USERNAME'],'chat'=>['username'=>'WrongChatName'],'forward_origin'=>['type'=>'user','sender_user'=>['username'=>'WrongForwardedAuthor']]]);$out=$deliver($u);$routes=$bot->store->read()['routes'];$aCopy=array_key_last($routes);$aHeading=$aCopy-1;
     check(array_column($out,0)===['sendMessage','copyMessage','sendMessage'] && $out[2][1]['chat_id']===$a,'incoming user message gets header, copy and user acknowledgement');
+    check($out[0][1]['chat_id']===$admin && $out[0][1]['text']==='客服消息 · #'.$a."\n昵称：FIXTURE_PERSONAL_NAME\n用户名：@FIXTURE_PERSONAL_USERNAME\n请回复这张卡片或下方消息。" && !isset($out[0][1]['parse_mode']),'operator card shows actual sender handle, name and ID as plain text, not forwarded/chat username');
     check($out[1][1]['chat_id']===$admin && $out[1][1]['from_chat_id']===$a && $out[1][1]['message_id']===$u['message']['message_id'],'correct incoming source and destination');
     check($routes[$aCopy]['chat_id']===$a && $routes[$aHeading]['chat_id']===$a && $out[1][1]['reply_parameters']['message_id']===$aHeading,'header and message both mapped to user');
     check($deliver($u)===[],'duplicate webhook does not resend');
     $out=$deliver($message(131313));check(count($out)===3,'first issue gets one receipt');
+    check(str_contains($out[0][1]['text'],"\n用户名：未设置用户名\n"),'sender without a username is identified explicitly');
     $out=$deliver($message(131313));check(count($out)===2,'follow-up within cooldown still forwards without receipt');
     $bot->store->locked(function(&$s)use($bot){$s['reply_receipts'][131313]['at']=time()-TelegramReplies::COOLDOWN-1;$bot->store->save($s);});
     $out=$deliver($message(131313));check(count($out)===3,'receipt becomes eligible after cooldown');
@@ -139,7 +141,22 @@ try {
     $u=$message(11112);$bot->store->locked(function(&$s)use($bot,$u){$s['updates'][$u['update_id']]=['at'=>time(),'status'=>'working','steps'=>['heading'=>['status'=>'pending']]];$bot->store->save($s);});$out=$deliver($u);
     check(count($out)===1 && str_contains($out[0][1]['text'],'待确认') && $bot->store->read()['updates'][$u['update_id']]['status']==='uncertain','crash after intent journal does not duplicate an uncertain send');
     $bot->store->locked(function(&$s)use($bot,$aCopy){$s['routes'][$aCopy]['at']=time()-31*86400;$bot->store->save($s);});$out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$aCopy]]));check(count($out)===1 && $out[0][0]==='sendMessage','expired reply mapping never routes to a user');
-    $raw=file_get_contents($bot->store->directory.'/state.json');check(!str_contains($raw,'PRIVATE_USER_TEXT')&&!str_contains($raw,'FIXTURE_PERSONAL_NAME')&&!str_contains($raw,'RESPONSE_CONTENT')&&!str_contains($raw,'ADMIN_PRIVATE_REPLY'),'storage contains no message body, response body or display name');
+    $identityPeer=282800;
+    foreach (['',null,[],true,123,'@WrongName',"Injected\n@Other",'Wrong<Name>',str_repeat('x',65),"Bidi\u{202e}Name"] as $bad) {
+        $out=$deliver($message(++$identityPeer,['from'=>['username'=>$bad]]));
+        check(str_contains($out[0][1]['text'],"\n用户名：未设置用户名\n") && $out[1][0]==='copyMessage','invalid handle is omitted without blocking relay: '.json_encode($bad));
+    }
+    foreach (['Ab_c',str_repeat('X',64)] as $valid) {
+        $out=$deliver($message(++$identityPeer,['from'=>['username'=>$valid]]));
+        check(str_contains($out[0][1]['text'],"\n用户名：@".$valid."\n"),'handle case and short or long valid values are preserved');
+    }
+    $out=$deliver($message(282900,['from'=>['first_name'=>"名字\n\u{2028}\u{202e}冒充",'username'=>'Current_User']]));$oldCard=$out[1][1]['reply_parameters']['message_id'];
+    check(substr_count($out[0][1]['text'],"\n")===3 && !str_contains($out[0][1]['text'],"\u{202e}") && str_contains($out[0][1]['text'],"\n用户名：@Current_User\n"),'display-name line and bidi controls do not corrupt the separate handle row');
+    $out=$deliver($message(282900,['from'=>['username'=>'Renamed_User']]));
+    check(str_contains($out[0][1]['text'],"\n用户名：@Renamed_User\n"),'new incoming card immediately reflects changed sender username');
+    $out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$oldCard]]));
+    check($out[0][0]==='copyMessage' && $out[0][1]['chat_id']===282900,'reply to an earlier card still uses the same numeric ID after a username change');
+    $raw=file_get_contents($bot->store->directory.'/state.json');check(!str_contains($raw,'PRIVATE_USER_TEXT')&&!str_contains($raw,'FIXTURE_PERSONAL_NAME')&&!str_contains($raw,'FIXTURE_PERSONAL_USERNAME')&&!str_contains($raw,'Renamed_User')&&!str_contains($raw,'RESPONSE_CONTENT')&&!str_contains($raw,'ADMIN_PRIVATE_REPLY'),'storage contains no message body, response body, display name or sender handle');
     check((fileperms($bot->store->directory.'/state.json')&0777)===0600 && (fileperms($bot->store->directory)&0777)===0700,'private file and directory modes');
     if (function_exists('pcntl_fork')) {
         $u=$message(161616);$log=$dir.'/concurrent.log';$pids=[];
