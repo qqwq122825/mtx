@@ -36,12 +36,21 @@ final class TelegramBot
                     if (in_array($job['delete_status'],['waiting','pending','retry'],true)) throw new Problem(409,'还有待删除的公告，请完成清理后再更换机器人或管理员。');
                 }
                 $draft=$s['settings']['token']==='' ? ($s['announcements']??null) : null;
+                $replies=$s['settings']['token']==='' ? ($s['auto_replies']??null) : null;
                 $s=TelegramStore::emptyState();
                 // A draft prepared before initial BotFather setup should survive that first binding.
                 if ($draft) {$s['announcements']=TelegramAnnouncements::defaults();$s['announcements']['card']=$draft['card'];$s['announcements']['card']['schedule_enabled']=false;$s['announcements']['revision']=$draft['revision'];}
+                if ($replies) $s['auto_replies']=$replies;
             }
             $s['settings']=['token'=>$token,'admin_id'=>$admin,'enabled'=>false,'secret'=>$s['settings']['secret']?:bin2hex(random_bytes(32)),'username'=>$s['settings']['username']];
             $this->store->save($s);
+        });
+    }
+    public function saveReplies(array $input): void
+    {
+        $values=TelegramReplies::validate($input);
+        $this->store->locked(function (&$s) use ($values) {
+            $s['auto_replies']=$values;$this->store->save($s);
         });
     }
     public function connect(): void
@@ -83,6 +92,7 @@ final class TelegramBot
         $s['updates']=array_filter($s['updates'],fn($v)=>$v['at']>$now-3*86400);
         $s['rates']=array_filter($s['rates'],fn($v)=>$v['at']>$now-60);
         $s['events']=array_slice($s['events'],-100);
+        $s['reply_receipts']=array_filter($s['reply_receipts']??[],fn($slot)=>is_array($slot) && is_int($slot['at']??null) && $slot['at']>$now-TelegramReplies::COOLDOWN);
     }
     private function event(array &$s,int $update,string $status,int $peer,int $code=0): void
     { $s['events'][]=['at'=>time(),'update_id'=>$update,'status'=>$status,'peer'=>$peer,'code'=>$code];$s['events']=array_slice($s['events'],-100); }
@@ -144,12 +154,23 @@ final class TelegramBot
                 if (!$admin && (isset($s['blocked'][$peer]) || $rate['count']>10)) { $s['updates'][$id]['status']='done';$this->event($s,$id,'filtered',$peer);$this->store->save($s);return; }
                 $this->store->save($s);
             }
-            $send=function (string $step,int $chat,string $body,?int $route=null) use (&$s,$id) { return $this->step($s,$id,$step,'sendMessage',['chat_id'=>$chat,'text'=>$body,'link_preview_options'=>['is_disabled'=>true]],$route); };
+            $send=function (string $step,int $chat,string $body,?int $route=null,?array $keyboard=null) use (&$s,$id) {
+                $params=['chat_id'=>$chat,'text'=>$body,'link_preview_options'=>['is_disabled'=>true]];
+                if ($keyboard!==null) $params['reply_markup']=$keyboard;
+                return $this->step($s,$id,$step,'sendMessage',$params,$route);
+            };
+            $replies=TelegramReplies::read($s);
             $eventPeer=$peer;
             try {
                 if (preg_match('/\A\/(start|help|id)(?:@[A-Za-z0-9_]+)?(?:\s.*)?\z/s',$text,$match)) {
-                    $body=$match[1]==='id'?'你的 Telegram 数字 ID：'.$peer:($admin?'客服管理：对用户消息或会话卡片使用“回复”即可回信。回复会话发送 /block 可屏蔽；/unblock 数字ID 解除；回复 /who 查看用户 ID。':'你好，这里是满天星客服。请直接发送问题、图片或文件，消息将交给管理员，回复也会通过本机器人发送。请勿发送密码、验证码或付款资料。');
-                    $send('command',$peer,$body);
+                    $body=match($match[1]) {
+                        'id'=>'你的 Telegram 数字 ID：'.$peer,
+                        'help'=>$admin?'客服管理：对用户消息或会话卡片使用“回复”即可回信。回复会话发送 /block 可屏蔽；/unblock 数字ID 解除；回复 /who 查看用户 ID。':$replies['welcome'],
+                        default=>$replies['welcome'],
+                    };
+                    $send('command',$peer,$body,null,$match[1]==='id' || ($admin && $match[1]==='help')?null:TelegramReplies::keyboard());
+                } elseif (isset(TelegramReplies::BUTTONS[$text]) && (!$admin || !isset($m['reply_to_message']))) {
+                    $send('quick_reply',$peer,$replies[TelegramReplies::BUTTONS[$text]]);
                 } elseif ($admin) {
                     $route=$this->route($s,$m);$eventPeer=$route['chat_id']??$peer;
                     if (preg_match('/\A\/unblock ([1-9][0-9]{0,15})\z/',$text,$match)) {
@@ -171,6 +192,25 @@ final class TelegramBot
                     $name=mb_substr(preg_replace('/[\x00-\x1f\x7f]/u',' ',is_string($m['from']['first_name']??null)?$m['from']['first_name']:'用户'),0,80);
                     $heading=$send('heading',$c['admin_id'],'客服消息 · #'.$peer."\n".$name."\n请回复这张卡片或下方消息。",$peer);
                     $this->step($s,$id,'incoming','copyMessage',['chat_id'=>$c['admin_id'],'from_chat_id'=>$peer,'message_id'=>$m['message_id'],'reply_parameters'=>['message_id'=>$heading['message_id'],'allow_sending_without_reply'=>true]],$peer);
+                    // Only acknowledge a confirmed copy. Reserve the cooldown before sending;
+                    // a 429 resumes this same step, an ambiguous send is never repeated.
+                    if (!array_key_exists('receipt_due',$s['updates'][$id])) {
+                        $due=!isset($s['reply_receipts'][$peer]) && count($s['reply_receipts'])<10000;
+                        $s['updates'][$id]['receipt_due']=$due;
+                        $this->store->save($s);
+                    }
+                    if ($s['updates'][$id]['receipt_due']) {
+                        $slot=$s['reply_receipts'][$peer]??null;
+                        $journal=$s['updates'][$id]['steps']['user_receipt']??null;
+                        // A much later retry must not duplicate a newer receipt or exceed the
+                        // map cap. Completed/uncertain journal entries still resolve via step().
+                        if (!$journal && (($slot && $slot['update_id']!==$id) || (!$slot && count($s['reply_receipts'])>=10000))) {
+                            $s['updates'][$id]['receipt_due']=false;
+                        } else {
+                            if (!$journal) {$s['reply_receipts'][$peer]=['at'=>time(),'update_id'=>$id];$this->store->save($s);}
+                            $send('user_receipt',$peer,$replies['received']);
+                        }
+                    }
                 }
                 $s['updates'][$id]['status']='done';$this->event($s,$id,'delivered',$eventPeer);$this->store->save($s);
             } catch (TelegramApiError $e) {

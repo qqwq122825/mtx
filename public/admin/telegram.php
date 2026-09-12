@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 if (!defined('MTX_FRONT_CONTROLLER')) { http_response_code(404); exit; }
-use MTX\{Http,Security,TelegramBot,TelegramApiError,Problem};
+use MTX\{Http,Security,TelegramBot,TelegramReplies,TelegramApiError,Problem};
 $app=require dirname(__DIR__,2).'/src/bootstrap.php';
 Http::method('GET','POST');Security::session($app);
 if (!Security::loggedIn($app)) Http::redirect($app->path('/admin/login.php'));
@@ -12,6 +12,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
     try {
         switch (Http::text($_POST,'action',20)) {
             case 'save': $bot->saveSettings($_POST);$notice='配置已保存，尚未启用。部署到 HTTPS 后点击启用。';break;
+            case 'replies': $bot->saveReplies($_POST);$notice='自动回复已保存，新消息立即使用，无需暂停机器人。';break;
             case 'connect': $bot->connect();$notice='Webhook 已启用，管理员已收到测试消息。';break;
             case 'disconnect': $bot->disconnect();$notice='机器人已暂停，Webhook 已移除。';break;
             case 'status': $status=$bot->status();$notice='Webhook '.($status['matches']?'地址匹配':'尚未指向本站').'；待处理 '.$status['pending'].' 条。'.($status['has_error']?' Telegram 记录过投递异常，请核对 HTTPS/CDN 配置。':'');break;
@@ -21,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
     } catch (Problem|TelegramApiError $e) { $_SESSION['telegram_notice']=['ok'=>false,'text'=>$e->getMessage()]; }
     Http::redirect($app->path('/admin/telegram.php'));
 }
-$s=$bot->store->read();$c=$s['settings'];$configured=$c['token']!=='';$notice=$_SESSION['telegram_notice']??null;unset($_SESSION['telegram_notice']);
+$s=$bot->store->read();$c=$s['settings'];$replies=TelegramReplies::read($s);$configured=$c['token']!=='';$notice=$_SESSION['telegram_notice']??null;unset($_SESSION['telegram_notice']);
 $stateLabel=$c['enabled']?'已启用':($configured?'已配置 · 暂停':'待配置');
 $events=array_reverse($s['events']);$failures=count(array_filter($events,fn($e)=>in_array($e['status'],['failed','uncertain'],true)));
 function e(mixed $v): string { return Http::escape($v); }
@@ -45,7 +46,13 @@ $labels=['delivered'=>'已处理','failed'=>'失败','uncertain'=>'结果待确�
 </section><section class="panel"><div class="section-title"><div><span class="step-number">02</span><h2>使用方式</h2></div></div><ol class="bot-steps"><li><strong>用户发给机器人</strong><p>支持文字、图片、文件、语音、视频和贴纸。只处理私聊，不读取群组或频道。</p></li><li><strong>你直接回复对应消息</strong><p>机器人将用户消息与会话卡片发给你。长按其中一条选择“回复”，回信会经机器人送达用户，不附带你的账号转发来源。</p></li><li><strong>管理骚扰消息</strong><p>回复用户消息发送 <code>/block</code> 屏蔽；发送 <code>/unblock 数字ID</code> 解除。<code>/who</code> 查询当前回复对象。</p></li></ol>
 <div class="note-box"><strong>部署后再启用</strong><p>Webhook 需要公网 HTTPS；CDN 对此路径关闭缓存和浏览器挑战，保留 POST 与校验头。Webhook 地址不包含 Token。</p></div><div class="bot-endpoint"><span class="endpoint-label">Webhook 地址</span><code><?=e($bot->webhookURL())?></code></div>
 <p class="muted compact">若 Telegram 限制账号与机器人交流，仍以平台实际提示为准。客服消息仅在用户主动联系后回复。群组 / 频道公告请在“公告卡片”页单独配置。</p></section></div>
-<section class="panel bot-records"><div class="section-title"><div><span class="step-number">03</span><h2>最近处理记录</h2></div><span class="muted">仅留状态与关联 ID</span></div>
+<section class="panel bot-records" id="auto-replies"><div class="section-title"><div><span class="step-number">03</span><h2>默认自动回复</h2></div><span class="muted">即时生效 · 无需暂停</span></div>
+<p class="muted compact">点击“开始”或发送 /start 展示欢迎语和三个快捷按钮。选择按钮后提示补充信息，实际问题仍转发给你。管理员也可以发送 /start 预览，发送 /help 查看管理指令。</p>
+<form method="post" action="<?=e($app->path('/admin/telegram.php'))?>" class="bot-form"><?php hidden('replies') ?>
+<?php foreach (TelegramReplies::LABELS as $key=>$label): ?><div><label for="reply-<?=e($key)?>"><?=e($label)?></label><textarea id="reply-<?=e($key)?>" name="<?=e($key)?>" rows="3" maxlength="1000" required><?=e($replies[$key])?></textarea></div><?php endforeach ?>
+<p class="muted compact">纯文字，支持换行，每项最多 1000 字。消息收到提示仅在实际问题成功转发后发送，同一用户 30 分钟内最多一次；连续补充文字、图片时不重复打扰。保存文案不会发送消息或修改 Token、会话、公告设置。</p>
+<button class="button primary full" type="submit">保存自动回复</button></form></section>
+<section class="panel bot-records"><div class="section-title"><div><span class="step-number">04</span><h2>最近处理记录</h2></div><span class="muted">仅留状态与关联 ID</span></div>
 <?php if (!$events): ?><div class="empty-state"><span class="empty-icon">✉</span><h3>等待第一条客服消息</h3><p>配置并启用后，处理状态会出现在这里。</p></div><?php else: ?><div class="bot-table-wrap"><table class="bot-table"><thead><tr><th>时间</th><th>会话 ID</th><th>Update ID</th><th>结果</th></tr></thead><tbody><?php foreach ($events as $event): ?><tr><td><?=e(gmdate('m-d H:i:s',$event['at']))?> UTC</td><td>#<?=e($event['peer'])?></td><td><?=e($event['update_id'])?></td><td><?=e($labels[$event['status']]??$event['status'])?><?=$event['code']?' · '.e($event['code']):''?></td></tr><?php endforeach ?></tbody></table></div><?php endif ?>
 <p class="muted compact">网络超时等结果不明确时不自动重复发送，标记为“结果待确认”；管理员确认后再手动回复。请勿把 Token、验证码或其他凭据发给客服。</p></section>
 <footer class="page-footer">MTX 客服机器人<span>单管理员 · 私聊双向转发 · 目录存储</span></footer></main></body></html>

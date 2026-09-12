@@ -2,7 +2,7 @@
 /** All Telegram calls use an injected fake. No real bot, messages or external network. */
 declare(strict_types=1);
 require dirname(__DIR__).'/vendor/autoload.php';
-use MTX\{App,Store,TelegramApi,TelegramApiError,TelegramBot,Problem};
+use MTX\{App,Store,TelegramApi,TelegramApiError,TelegramBot,TelegramReplies,Problem};
 $count=0;
 function check(bool $ok,string $label): void { global $count; if (!$ok) throw new RuntimeException('FAIL '.$label);$count++;echo 'PASS '.$label."\n"; }
 function problem(callable $fn,int $status): bool { try {$fn();}catch(Problem $e){return $e->status===$status;}return false; }
@@ -20,7 +20,7 @@ try {
     $calls=[];$next=100;$failure=null;
     $api=new TelegramApi(function($method,$params) use (&$calls,&$next,&$failure) {
         $calls[]=[$method,$params];
-        if ($failure && $failure[0]===$method) { $e=$failure[1];$failure=null;throw $e; }
+        if ($failure && $failure[0]===$method && (!isset($failure[2]) || ($params['chat_id']??null)===$failure[2])) { $e=$failure[1];$failure=null;throw $e; }
         return match($method) {'getMe'=>['is_bot'=>true,'username'=>'MTXFixtureBot'],'setWebhook','deleteWebhook'=>true,'getWebhookInfo'=>['url'=>'https://updates.example.com/r-telegram-fixture-0123456789/api/telegram-webhook.php','pending_update_count'=>2],default=>['message_id'=>++$next,'text'=>'RESPONSE_CONTENT_NOT_FOR_STORAGE']};
     });
     $bot=new TelegramBot(new App(),$api);$admin=77777;$a=88888;$b=99999;
@@ -50,13 +50,38 @@ try {
     $deliver=function(array $u) use ($bot,$secret,&$calls):array { $n=count($calls);$bot->receive($u,$secret);return array_slice($calls,$n); };
     check(problem(fn()=>$bot->receive($message($a),'wrong'),403),'forged webhook secret rejected');
     check(problem(fn()=>$bot->receive(['update_id'=>'1'],$secret),422),'update ID is strictly integer');
-    $out=$deliver($message($a,['text'=>'/start']));check(count($out)===1 && $out[0][1]['chat_id']===$a && str_contains($out[0][1]['text'],'管理员'),'user welcome explains relay');
+    $out=$deliver($message($a,['text'=>'/start']));check(count($out)===1 && $out[0][1]['chat_id']===$a && str_contains($out[0][1]['text'],'看到消息后') && isset($out[0][1]['reply_markup']['keyboard']),'user welcome includes reply choices');
     $out=$deliver($message($a,['text'=>'/id']));check(str_contains($out[0][1]['text'],(string)$a),'id command returns caller only');
+    $settings=$bot->store->read()['settings'];$defaults=TelegramReplies::defaults();
+    check(TelegramReplies::read($bot->store->read())===$defaults,'existing state uses default replies without migration');
+    foreach (TelegramReplies::BUTTONS as $button=>$field) {
+        $out=$deliver($message(121212,['text'=>$button]));
+        check(count($out)===1 && $out[0][1]['text']===$defaults[$field] && $out[0][1]['chat_id']===121212,'quick reply only goes to the requesting user: '.$field);
+    }
+    $out=$deliver($message($admin,['text'=>'/start']));check($out[0][1]['text']===$defaults['welcome'],'operator can preview the same welcome');
+    $out=$deliver($message($admin,['text'=>'/help']));check(str_contains($out[0][1]['text'],'/block') && !isset($out[0][1]['reply_markup']),'operator help keeps moderation instructions');
+    $custom=$defaults;$custom['welcome']="CUSTOM welcome <tag>\nSecond line";
+    $bot->saveReplies($custom+['token'=>'ignored','admin_id'=>'123']);
+    check($bot->store->read()['settings']===$settings,'editing replies while enabled preserves binding and webhook secret');
+    $out=$deliver($message(121212,['text'=>'/start']));check($out[0][1]['text']===$custom['welcome'] && !isset($out[0][1]['parse_mode']),'custom welcome is plain text and immediate');
+    foreach (['',str_repeat('字',1001),['bad'],"bad\0text"] as $bad) {
+        check(problem(fn()=>$bot->saveReplies(array_replace($defaults,['welcome'=>$bad])),422),'invalid template rejected atomically');
+        check(TelegramReplies::read($bot->store->read())===$custom,'invalid edit leaves prior templates intact');
+    }
+    $bot->saveReplies($defaults);
     $u=$message($a);$out=$deliver($u);$routes=$bot->store->read()['routes'];$aCopy=array_key_last($routes);$aHeading=$aCopy-1;
-    check(array_column($out,0)===['sendMessage','copyMessage'],'incoming user message gets header and copy');
+    check(array_column($out,0)===['sendMessage','copyMessage','sendMessage'] && $out[2][1]['chat_id']===$a,'incoming user message gets header, copy and user acknowledgement');
     check($out[1][1]['chat_id']===$admin && $out[1][1]['from_chat_id']===$a && $out[1][1]['message_id']===$u['message']['message_id'],'correct incoming source and destination');
     check($routes[$aCopy]['chat_id']===$a && $routes[$aHeading]['chat_id']===$a && $out[1][1]['reply_parameters']['message_id']===$aHeading,'header and message both mapped to user');
     check($deliver($u)===[],'duplicate webhook does not resend');
+    $out=$deliver($message(131313));check(count($out)===3,'first issue gets one receipt');
+    $out=$deliver($message(131313));check(count($out)===2,'follow-up within cooldown still forwards without receipt');
+    $bot->store->locked(function(&$s)use($bot){$s['reply_receipts'][131313]['at']=time()-TelegramReplies::COOLDOWN-1;$bot->store->save($s);});
+    $out=$deliver($message(131313));check(count($out)===3,'receipt becomes eligible after cooldown');
+    $failure=['copyMessage',new TelegramApiError(403)];$out=$deliver($message(141414));
+    check(!array_filter($out,fn($call)=>($call[1]['chat_id']??0)===141414) && !isset($bot->store->read()['reply_receipts'][141414]),'failed incoming copy never tells user message was received');
+    $out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$aCopy],'text'=>'💬 项目咨询']));
+    check($out[0][0]==='copyMessage' && $out[0][1]['chat_id']===$a,'operator reply matching menu text still reaches user');
     $reply=$message($admin,['reply_to_message'=>['message_id'=>$aCopy],'text'=>'ADMIN_PRIVATE_REPLY']);$out=$deliver($reply);
     check($out[0][0]==='copyMessage' && $out[0][1]['chat_id']===$a && $out[0][1]['from_chat_id']===$admin && $out[0][1]['message_id']===$reply['message']['message_id'],'operator replies via bot copy to mapped user');
     check($out[1][1]['chat_id']===$admin && str_contains($out[1][1]['text'],'已回复'),'operator delivery receipt');
@@ -84,7 +109,25 @@ try {
     $headingCount=count(array_filter(array_slice($calls,$n),fn($v)=>$v[0]==='sendMessage'));
     check(problem(fn()=>$bot->receive($u,$secret),503) && count($calls)===$n+2,'retry-after window performs no new outbound calls');
     $bot->store->locked(function(&$s)use($bot,$u){$s['updates'][$u['update_id']]['retry_at']=0;$bot->store->save($s);});$out=$deliver($u);
-    check($headingCount===1 && count($out)===1 && $out[0][0]==='copyMessage','429 retry resumes incomplete step without duplicating header');
+    check($headingCount===1 && count($out)===2 && $out[0][0]==='copyMessage' && $out[1][1]['chat_id']===22222,'429 retry resumes incomplete step without duplicating header');
+    $failure=['sendMessage',new TelegramApiError(429,false,1),232323];$u=$message(232323);
+    check(problem(fn()=>$bot->receive($u,$secret),503),'receipt 429 schedules retry after a confirmed forward');
+    check($bot->store->read()['updates'][$u['update_id']]['receipt_due'] && isset($bot->store->read()['reply_receipts'][232323]),'receipt intent and cooldown survive rate limit');
+    $out=$deliver($message(232323));check(count($out)===2,'another message during receipt retry does not repeat receipt');
+    $bot->store->locked(function(&$s)use($bot,$u){$s['updates'][$u['update_id']]['retry_at']=0;$bot->store->save($s);});
+    $out=$deliver($u);check(count($out)===1 && $out[0][1]['chat_id']===232323 && $deliver($u)===[],'receipt retry only completes receipt, not the already copied message');
+    $failure=['sendMessage',new TelegramApiError(429,false,1),232324];$oldReceipt=$message(232324);
+    check(problem(fn()=>$bot->receive($oldReceipt,$secret),503),'long receipt retry starts with known 429');
+    $bot->store->locked(function(&$s)use($bot,$oldReceipt){$s['updates'][$oldReceipt['update_id']]['retry_at']=0;$s['reply_receipts'][232324]['at']=time()-TelegramReplies::COOLDOWN-1;$bot->store->save($s);});
+    check(count($deliver($message(232324)))===3,'new contact after expired reservation may receive fresh receipt');
+    check($deliver($oldReceipt)===[],'very late old receipt retry yields to a newer receipt');
+    $failure=['sendMessage',new TelegramApiError(0,true),242424];$u=$message(242424);$out=$deliver($u);
+    check($bot->store->read()['updates'][$u['update_id']]['status']==='uncertain' && $deliver($u)===[],'ambiguous receipt is not automatically resent');
+    check(count($deliver($message(242424)))===2,'ambiguous receipt retains cooldown but later user content still forwards');
+    $receipts=$bot->store->read()['reply_receipts'];
+    $bot->store->locked(function(&$s)use($bot){$s['reply_receipts']=array_fill_keys(range(500000,509999),['at'=>time(),'update_id'=>0]);$bot->store->save($s);});
+    check(count($deliver($message(252525)))===2 && count($bot->store->read()['reply_receipts'])===10000,'full receipt map skips optional receipt without blocking message forwarding');
+    $bot->store->locked(function(&$s)use($bot,$receipts){$s['reply_receipts']=$receipts;$bot->store->save($s);});
     $failure=['copyMessage',new TelegramApiError(0,true)];$u=$message(11111);$out=$deliver($u);check($bot->store->read()['updates'][$u['update_id']]['status']==='uncertain' && $deliver($u)===[],'network ambiguity marked for review, never blindly resent');
     $u=$message(11112);$bot->store->locked(function(&$s)use($bot,$u){$s['updates'][$u['update_id']]=['at'=>time(),'status'=>'working','steps'=>['heading'=>['status'=>'pending']]];$bot->store->save($s);});$out=$deliver($u);
     check(count($out)===1 && str_contains($out[0][1]['text'],'待确认') && $bot->store->read()['updates'][$u['update_id']]['status']==='uncertain','crash after intent journal does not duplicate an uncertain send');
@@ -95,7 +138,7 @@ try {
         $u=$message(161616);$log=$dir.'/concurrent.log';$pids=[];
         for($i=0;$i<2;$i++){ $pid=pcntl_fork();if($pid===0){$counter=9000;$api2=new TelegramApi(function($method,$params)use($log,&$counter){file_put_contents($log,$method."\n",FILE_APPEND|LOCK_EX);usleep(30000);return ['message_id'=>++$counter];});(new TelegramBot(new App(),$api2))->receive($u,$secret);exit(0);}$pids[]=$pid; }
         foreach($pids as $pid){pcntl_waitpid($pid,$status);check(pcntl_wexitstatus($status)===0,'concurrent worker completed');}
-        check(file($log,FILE_IGNORE_NEW_LINES)===['sendMessage','copyMessage'],'concurrent duplicate updates forwarded exactly once in normal execution');
+        check(file($log,FILE_IGNORE_NEW_LINES)===['sendMessage','copyMessage','sendMessage'],'concurrent duplicate updates forwarded and acknowledged exactly once in normal execution');
     }
     $failure=['deleteWebhook',new TelegramApiError(0,true)];try{$bot->disconnect();}catch(TelegramApiError){}check(!$bot->store->read()['settings']['enabled'],'pause is local-first even if remote removal is uncertain');
     check($deliver($message($b))===[],'paused valid webhook does not send');

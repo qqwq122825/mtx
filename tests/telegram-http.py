@@ -54,10 +54,16 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         check(request(ann,fields=draft|{'csrf':csrf(ann),'action':'save','target':'12345'})[0]==200 and json.loads((storage/'telegram/state.json').read_text())['announcements']['card']['target']=='@TestChannel','invalid target never replaces stored draft')
         page=request(ann,fields={'csrf':csrf(ann),'action':'test','request_id':'a'*32})[1]
         check('请先'.encode() in page and not json.loads((storage/'telegram/state.json').read_text())['announcements']['jobs'],'unconfigured test stops before network')
+        reply_draft={'welcome':'你好，满天星 <script>not-executed</script>', 'consult':'项目咨询', 'install':'安装帮助', 'support':'售后反馈', 'received':'消息已收到'}
+        check(request('/admin/telegram.php',fields=reply_draft|{'csrf':'bad','action':'replies'})[0]==403,'auto-reply changes require CSRF')
+        check(request('/admin/telegram.php',fields=reply_draft|{'csrf':csrf(),'action':'replies'})[0]==303,'save auto-reply draft through HTTP without sending messages')
+        page=request('/admin/telegram.php')[1]
+        check(b'&lt;script&gt;not-executed&lt;/script&gt;' in page and b'<script>not-executed</script>' not in page,'reply editor escapes custom text')
         token='123456:'+secrets.token_urlsafe(32)
         check(request('/admin/telegram.php',fields={'csrf':csrf(),'action':'save','token':token,'admin_id':'77777'})[0]==303,'save fake bot configuration via POST')
         statepath=storage/'telegram/state.json';state=json.loads(statepath.read_text());secret=state['settings']['secret']
         check(state['announcements']['card']['target']=='@TestChannel','initial bot binding preserves prepared announcement draft')
+        check(state['auto_replies']==reply_draft,'initial bot binding preserves welcome drafts')
         check(token.encode() not in request(ann)[1] and secret.encode() not in request(ann)[1],'announcement page never exposes bot secrets')
         request(ann,fields=draft|{'csrf':csrf(ann),'action':'save','schedule_enabled':'1'})
         check(not json.loads(statepath.read_text())['announcements']['card']['schedule_enabled'],'paused bot cannot enable announcement schedule')
@@ -82,6 +88,13 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         update={'update_id':2,'message':{'chat':{'type':'group','id':-123},'from':{'id':77777,'is_bot':False},'message_id':4,'date':int(time.time()),'text':'MUST_NOT_BE_SENT'}}
         check(request(hook,body=json.dumps(update).encode(),headers=h)[0]==200,'authenticated group update ignored over real HTTP')
         check(not json.loads(statepath.read_text())['updates'],'ignored group creates no relay job')
+        before=json.loads(statepath.read_text());edited=reply_draft|{'welcome':'你好，这里是满天星 ✨'}
+        check(request('/admin/telegram.php',fields=edited|{'csrf':csrf(),'action':'replies','token':'ignored','admin_id':'99999'})[0]==303,'edit auto-replies while bot remains enabled')
+        current=json.loads(statepath.read_text())
+        check(current['auto_replies']==edited and current['settings']==before['settings'] and current['announcements']==before['announcements'] and current['routes']==before['routes'],'reply edit preserves credentials, routes and announcement draft')
+        for bad in ['', '字'*1001]:
+            request('/admin/telegram.php',fields=edited|{'welcome':bad,'csrf':csrf(),'action':'replies'})
+            check(json.loads(statepath.read_text())['auto_replies']==edited,'invalid template leaves configured replies intact')
         request('/admin/telegram.php',fields={'csrf':csrf(),'action':'save','token':token,'admin_id':'88888'})
         check(json.loads(statepath.read_text())['settings']['admin_id']==77777,'active binding change rejected over HTTP')
         log.flush();check(token not in (t/'server.log').read_text() and secret not in (t/'server.log').read_text(),'server log contains no bot credentials')
