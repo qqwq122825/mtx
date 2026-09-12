@@ -49,7 +49,7 @@ $labels=['delivered'=>'已处理','failed'=>'失败','uncertain'=>'结果待确�
 <div class="note-box"><strong>部署后再启用</strong><p>Webhook 需要公网 HTTPS；CDN 对此路径关闭缓存和浏览器挑战，保留 POST 与校验头。Webhook 地址不包含 Token。</p></div><div class="bot-endpoint"><span class="endpoint-label">Webhook 地址</span><code><?=e($bot->webhookURL())?></code></div>
 <p class="muted compact">若 Telegram 限制账号与机器人交流，仍以平台实际提示为准。客服消息仅在用户主动联系后回复。群组 / 频道公告请在“公告卡片”页单独配置。</p></section></div>
 <section class="panel bot-records" id="auto-replies"><div class="section-title"><div><span class="step-number">03</span><h2>默认自动回复</h2></div><span class="muted">即时生效 · 无需暂停</span></div>
-<p class="muted compact">点击“开始”或发送 /start 展示欢迎卡片，三个按钮直接附在消息下方，不占用输入框。点击卡片按钮后提示补充信息，实际问题仍转发给你。管理员也可以发送 /start 预览，发送 /help 查看管理指令。</p>
+<p class="muted compact">点击“开始”或发送 /start 展示欢迎卡片，“💬 问题咨询”和“🤝 合作咨询”两个按钮直接附在消息下方，不占用输入框。点击卡片按钮后提示补充信息，实际问题仍转发给你。管理员也可以发送 /start 预览，发送 /help 查看管理指令。</p>
 <form method="post" action="<?=e($app->path('/admin/telegram.php'))?>" class="bot-form"><?php hidden('replies') ?>
 <?php foreach (TelegramReplies::LABELS as $key=>$label): ?><div><label for="reply-<?=e($key)?>"><?=e($label)?></label><textarea id="reply-<?=e($key)?>" name="<?=e($key)?>" rows="3" maxlength="1000" required><?=e($replies[$key])?></textarea></div><?php endforeach ?>
 <p class="muted compact">纯文字，支持换行，每项最多 1000 字。消息收到提示仅在实际问题成功转发后发送，同一用户 30 分钟内最多一次；连续补充文字、图片时不重复打扰。保存文案不会发送消息或修改 Token、会话、公告设置。</p>

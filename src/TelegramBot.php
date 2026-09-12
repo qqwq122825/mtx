@@ -130,7 +130,7 @@ final class TelegramBot
     {
         if (!is_array($query) || !is_string($query['id']??null) || !preg_match('/\A[\x21-\x7e]{1,256}\z/D',$query['id'])) return null;
         $from=$query['from']??[];$message=$query['message']??[];$data=$query['data']??null;
-        if (!is_string($data) || !preg_match('/\Amtx:reply:(consult|install|support)\z/D',$data,$match)) return null;
+        if (!is_string($data) || !preg_match('/\Amtx:reply:(question|cooperation)\z/D',$data,$match)) return null;
         if (($from['is_bot']??true)!==false || !is_int($from['id']??null) || $from['id']<=0 || ($message['chat']['type']??'')!=='private' || ($message['chat']['id']??null)!==$from['id']) return null;
         if (($message['from']['is_bot']??false)!==true || ($message['from']['id']??null)!==(int)explode(':',$settings['token'],2)[0] || !is_int($message['message_id']??null) || $message['message_id']<1 || isset($query['inline_message_id'])) return null;
         return ['id'=>$query['id'],'peer'=>$from['id'],'field'=>$match[1]];

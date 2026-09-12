@@ -54,11 +54,13 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         check(request(ann,fields=draft|{'csrf':csrf(ann),'action':'save','target':'12345'})[0]==200 and json.loads((storage/'telegram/state.json').read_text())['announcements']['card']['target']=='@TestChannel','invalid target never replaces stored draft')
         page=request(ann,fields={'csrf':csrf(ann),'action':'test','request_id':'a'*32})[1]
         check('请先'.encode() in page and not json.loads((storage/'telegram/state.json').read_text())['announcements']['jobs'],'unconfigured test stops before network')
-        reply_draft={'welcome':'你好，满天星 <script>not-executed</script>', 'consult':'项目咨询', 'install':'安装帮助', 'support':'售后反馈', 'received':'消息已收到'}
+        reply_draft={'welcome':'你好，满天星 <script>not-executed</script>', 'question':'问题咨询', 'cooperation':'合作咨询', 'received':'消息已收到'}
         check(request('/admin/telegram.php',fields=reply_draft|{'csrf':'bad','action':'replies'})[0]==403,'auto-reply changes require CSRF')
         check(request('/admin/telegram.php',fields=reply_draft|{'csrf':csrf(),'action':'replies'})[0]==303,'save auto-reply draft through HTTP without sending messages')
         page=request('/admin/telegram.php')[1]
         check(b'&lt;script&gt;not-executed&lt;/script&gt;' in page and b'<script>not-executed</script>' not in page,'reply editor escapes custom text')
+        check(re.findall(rb'<textarea[^>]+name="([^"]+)"',page)==[b'welcome',b'question',b'cooperation',b'received'] and '问题咨询'.encode() in page and '合作咨询'.encode() in page,'backend exposes only welcome, two inquiry templates and receipt')
+        check('安装帮助'.encode() not in page and '售后反馈'.encode() not in page and '项目咨询'.encode() not in page,'removed categories are absent from the editor')
         token='123456:'+secrets.token_urlsafe(32)
         check(request('/admin/telegram.php',fields={'csrf':csrf(),'action':'save','token':token,'admin_id':'77777'})[0]==303,'save fake bot configuration via POST')
         statepath=storage/'telegram/state.json';state=json.loads(statepath.read_text());secret=state['settings']['secret']
@@ -91,7 +93,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         update={'update_id':2,'message':{'chat':{'type':'group','id':-123},'from':{'id':77777,'is_bot':False},'message_id':4,'date':int(time.time()),'text':'MUST_NOT_BE_SENT'}}
         check(request(hook,body=json.dumps(update).encode(),headers=h)[0]==200,'authenticated group update ignored over real HTTP')
         check(not json.loads(statepath.read_text())['updates'],'ignored group creates no relay job')
-        bad_callback={'update_id':3,'callback_query':{'id':'fixture-query','from':{'id':88888,'is_bot':False},'data':'mtx:reply:consult','message':{'message_id':1,'chat':{'type':'group','id':-123},'from':{'id':123456,'is_bot':True}}}}
+        bad_callback={'update_id':3,'callback_query':{'id':'fixture-query','from':{'id':88888,'is_bot':False},'data':'mtx:reply:question','message':{'message_id':1,'chat':{'type':'group','id':-123},'from':{'id':123456,'is_bot':True}}}}
         check(request(hook,body=json.dumps(bad_callback).encode(),headers=h)[0]==200 and not json.loads(statepath.read_text())['updates'],'group callback is ignored over real HTTP without outbound calls')
         check('卡片按钮接入维护'.encode() in request('/admin/telegram.php')[1],'enabled backend exposes subscription upgrade control')
 

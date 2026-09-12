@@ -55,6 +55,12 @@ try {
     $out=$deliver($message($a,['text'=>'/id']));check(str_contains($out[0][1]['text'],(string)$a),'id command returns caller only');
     $settings=$bot->store->read()['settings'];$defaults=TelegramReplies::defaults();
     check(TelegramReplies::read($bot->store->read())===$defaults,'existing state uses default replies without migration');
+    $legacy=['welcome'=>'Existing welcome','consult'=>'Old project','install'=>'Old install','support'=>'Old support','received'=>'Existing receipt'];
+    $current=TelegramReplies::read(['auto_replies'=>$legacy]);
+    check(array_keys($current)===['welcome','question','cooperation','received'] && $current['welcome']===$legacy['welcome'] && $current['received']===$legacy['received'] && $current['question']===$defaults['question'] && $current['cooperation']===$defaults['cooperation'],'old templates retain welcome and receipt without leaking removed categories');
+    $bot->saveReplies($current+$legacy);
+    check($bot->store->read()['auto_replies']===$current && $bot->store->read()['settings']===$settings,'saving current templates drops obsolete fields and preserves enabled binding');
+    $bot->saveReplies($defaults);
     foreach (TelegramReplies::BUTTONS as $button=>$field) {
         $out=$deliver($message(121212,['text'=>$button]));
         check(count($out)===1 && $out[0][1]['text']===$defaults[$field] && $out[0][1]['chat_id']===121212,'quick reply only goes to the requesting user: '.$field);
@@ -81,7 +87,7 @@ try {
     $out=$deliver($message(131313));check(count($out)===3,'receipt becomes eligible after cooldown');
     $failure=['copyMessage',new TelegramApiError(403)];$out=$deliver($message(141414));
     check(!array_filter($out,fn($call)=>($call[1]['chat_id']??0)===141414) && !isset($bot->store->read()['reply_receipts'][141414]),'failed incoming copy never tells user message was received');
-    $out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$aCopy],'text'=>'💬 项目咨询']));
+    $out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$aCopy],'text'=>'💬 问题咨询']));
     check($out[0][0]==='copyMessage' && $out[0][1]['chat_id']===$a,'operator reply matching menu text still reaches user');
     $reply=$message($admin,['reply_to_message'=>['message_id'=>$aCopy],'text'=>'ADMIN_PRIVATE_REPLY']);$out=$deliver($reply);
     check($out[0][0]==='copyMessage' && $out[0][1]['chat_id']===$a && $out[0][1]['from_chat_id']===$admin && $out[0][1]['message_id']===$reply['message']['message_id'],'operator replies via bot copy to mapped user');
@@ -145,29 +151,31 @@ try {
     check(count($newCalls)===1 && $newCalls[0][0]==='setWebhook' && $newCalls[0][1]['allowed_updates']===['message','callback_query'] && !$newCalls[0][1]['drop_pending_updates'],'subscription refresh adds card callbacks without dropping pending updates');
     check($bot->store->read()===$before,'subscription refresh leaves enabled binding, templates, routes and state intact');
     $card=TelegramReplies::keyboard();$buttons=array_merge(...$card['inline_keyboard']);
-    check(array_column($buttons,'callback_data')===['mtx:reply:consult','mtx:reply:install','mtx:reply:support'] && !isset($card['keyboard']),'welcome uses message-attached callback buttons only');
-    $callback=function(int $chat,string $field='consult',array $extra=[])use(&$uid):array {
+    check(count($card['inline_keyboard'])===1 && count($buttons)===2 && array_column($buttons,'text')===['💬 问题咨询','🤝 合作咨询'],'welcome has exactly two choices in one nonempty row');
+    check(array_column($buttons,'callback_data')===['mtx:reply:question','mtx:reply:cooperation'] && !isset($card['keyboard']),'welcome uses message-attached callback buttons only');
+    $callback=function(int $chat,string $field='question',array $extra=[])use(&$uid):array {
         $id=$uid++;return ['update_id'=>$id,'callback_query'=>array_replace_recursive(['id'=>'query-'.$id,'from'=>['id'=>$chat,'is_bot'=>false],'data'=>'mtx:reply:'.$field,'message'=>['message_id'=>654321,'date'=>time()-86400*7,'chat'=>['id'=>$chat,'type'=>'private'],'from'=>['id'=>123456,'is_bot'=>true],'text'=>'PRIVATE_CALLBACK_CARD_BODY']],$extra)];
     };
+    foreach (['consult','install','support'] as $removed) check($deliver($callback(313130,$removed))===[],'removed category no longer triggers a template: '.$removed);
     check(problem(fn()=>$bot->receive($callback(313131),'bad'),403),'callback requires the same webhook secret');
     $beforeRoutes=$bot->store->read()['routes'];
-    foreach (['consult','install','support'] as $field) {
+    foreach (['question','cooperation'] as $field) {
         $u=$callback(313131,$field);$out=$deliver($u);
         check(array_column($out,0)===['answerCallbackQuery','sendMessage'] && $out[0][1]['callback_query_id']===$u['callback_query']['id'] && $out[1][1]['chat_id']===313131 && $out[1][1]['text']===$defaults[$field],'card click acknowledges spinner and replies privately: '.$field);
         check($deliver($u)===[],'duplicate callback update does not resend: '.$field);
     }
     check($bot->store->read()['routes']===$beforeRoutes && !isset($bot->store->read()['reply_receipts'][313131]),'menu callbacks create neither support routes nor received receipts');
-    $out=$deliver($callback($admin,'install'));check($out[1][1]['text']===$defaults['install'] && ($out[1][1]['reply_markup']['remove_keyboard']??false),'operator can test a card and old input keyboard is removed');
-    $edited=$defaults;$edited['consult']='CUSTOM consult <tag>';$bot->saveReplies($edited);
-    $out=$deliver($callback(313131));check($out[1][1]['text']===$edited['consult'] && !isset($out[1][1]['parse_mode']),'old card clicks immediately use saved plain-text templates');$bot->saveReplies($defaults);
+    $out=$deliver($callback($admin,'cooperation'));check($out[1][1]['text']===$defaults['cooperation'] && ($out[1][1]['reply_markup']['remove_keyboard']??false),'operator can test a card and old input keyboard is removed');
+    $edited=$defaults;$edited['question']='CUSTOM question <tag>';$bot->saveReplies($edited);
+    $out=$deliver($callback(313131));check($out[1][1]['text']===$edited['question'] && !isset($out[1][1]['parse_mode']),'old card clicks immediately use saved plain-text templates');$bot->saveReplies($defaults);
     $invalid=[['data'=>'mtx:reply:unknown'],['data'=>'/block'],['data'=>[]],['id'=>''],['id'=>str_repeat('a',257)],['id'=>"query\ncontrol"],['from'=>['id'=>0]],['from'=>['is_bot'=>true]],['message'=>['chat'=>['type'=>'group']]],['message'=>['chat'=>['id'=>919191]]],['message'=>['from'=>['id'=>999999]]],['message'=>['from'=>['is_bot'=>false]]],['message'=>['message_id'=>0]],['inline_message_id'=>'foreign-inline']];
-    foreach($invalid as $bad) check($deliver($callback(323232,'consult',$bad))===[],'invalid or foreign callback ignored: '.json_encode($bad));
+    foreach($invalid as $bad) check($deliver($callback(323232,'question',$bad))===[],'invalid or foreign callback ignored: '.json_encode($bad));
     $inaccessible=$callback(323232);unset($inaccessible['callback_query']['message']['from']);check($deliver($inaccessible)===[],'inaccessible card with no verifiable bot sender ignored');
     $bot->store->locked(function(&$s)use($bot){$s['blocked'][333334]=time();$bot->store->save($s);});
     check($deliver($callback(333334))===[],'blocked user cannot trigger card replies');
     for($i=0;$i<10;$i++)$deliver($callback(333335));check($deliver($callback(333335))===[],'card clicks share per-user rate limit');
     $failure=['answerCallbackQuery',new TelegramApiError(400)];$out=$deliver($callback(343434));
-    check(count($out)===2 && $out[1][1]['text']===$defaults['consult'],'expired callback acknowledgement does not block actual reply');
+    check(count($out)===2 && $out[1][1]['text']===$defaults['question'],'expired callback acknowledgement does not block actual reply');
     $failure=['sendMessage',new TelegramApiError(429,false,1),343435];$u=$callback(343435);
     check(problem(fn()=>$bot->receive($u,$secret),503),'card reply 429 uses existing retry journal');
     $bot->store->locked(function(&$s)use($bot,$u){$s['updates'][$u['update_id']]['retry_at']=0;$bot->store->save($s);});
