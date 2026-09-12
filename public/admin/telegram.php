@@ -6,11 +6,19 @@ $app=require dirname(__DIR__,2).'/src/bootstrap.php';
 Http::method('GET','POST');Security::session($app);
 if (!Security::loggedIn($app)) Http::redirect($app->path('/admin/login.php'));
 header('Cache-Control: no-store');
-$bot=new TelegramBot($app);$trials=new TelegramTrials($bot->store);$activityView=Http::text($_GET,'view',20)==='activities';
+$bot=new TelegramBot($app);$trials=new TelegramTrials($bot->store);$view=Http::text($_GET,'view',20);$activityView=$view==='activities';$conversationView=$view==='conversations';
+if (isset($_GET['asset']) && $_SERVER['REQUEST_METHOD']==='GET') {
+    $assets=['conversations-js'=>['telegram-conversations.js','text/javascript'],'conversations-css'=>['telegram-conversations.css','text/css']];
+    $asset=Http::text($_GET,'asset',30);if (!isset($assets[$asset])) throw new Problem(404,'资源不存在。');
+    header('Content-Type: '.$assets[$asset][1].'; charset=utf-8');readfile(dirname(__DIR__).'/assets/'.$assets[$asset][0]);exit;
+}
 if ($_SERVER['REQUEST_METHOD']==='POST') {
     Security::csrf();
     try {
         switch (Http::text($_POST,'action',20)) {
+            case 'conversation_list': Http::json($bot->conversations->listing($bot->store->read()['settings'],$_POST));
+            case 'conversation_detail': Http::json($bot->conversations->detail($bot->store->read()['settings'],$_POST));
+            case 'conversation_config': $bot->conversations->configure($_POST);$notice='会话记录设置已保存。缩短保留期时，超期记录已清理。';break;
             case 'trial_save': $trials->save($_POST);$notice='活动设置已保存，新欢迎卡片即时生效。';break;
             case 'trial_import': $import=$trials->import($_POST);$notice='已导入 '.$import['added'].' 张，跳过重复或已分配卡 '.$import['skipped'].' 张。';break;
             case 'trial_pause': $trials->pause($_POST);$notice='领取已暂停，旧卡片按钮也停止发卡；库存和限领记录保留。';break;
@@ -25,22 +33,23 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         }
         $_SESSION['telegram_notice']=['ok'=>true,'text'=>$notice];
     } catch (Problem|TelegramApiError $e) { $_SESSION['telegram_notice']=['ok'=>false,'text'=>$e->getMessage()]; }
-    Http::redirect($app->path('/admin/telegram.php').($activityView?'?view=activities':''));
+    Http::redirect($app->path('/admin/telegram.php').($activityView?'?view=activities':($conversationView?'?view=conversations':'')));
 }
 $s=$bot->store->read();$c=$s['settings'];$replies=TelegramReplies::read($s);$configured=$c['token']!=='';$notice=$_SESSION['telegram_notice']??null;unset($_SESSION['telegram_notice']);
 $stateLabel=$c['enabled']?'已启用':($configured?'已配置 · 暂停':'待配置');
 $events=array_reverse($s['events']);$failures=count(array_filter($events,fn($e)=>in_array($e['status'],['failed','uncertain'],true)));
 function e(mixed $v): string { return Http::escape($v); }
 function hidden(string $action): void { echo '<input type="hidden" name="csrf" value="'.e($_SESSION['csrf']).'"><input type="hidden" name="action" value="'.e($action).'">'; }
+if ($conversationView) { require dirname(__DIR__,2).'/src/views/telegram-conversations.php';exit; }
 if ($activityView) { require dirname(__DIR__,2).'/src/views/telegram-activities.php'; exit; }
 $labels=['delivered'=>'已处理','failed'=>'失败','uncertain'=>'结果待确认','filtered'=>'已过滤'];
 ?>
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Telegram 客服 · 满天星</title><link rel="stylesheet" href="<?=e($app->path('/assets/app.css'))?>"><script src="<?=e($app->path('/assets/app.js'))?>" defer></script></head><body>
 <header class="topbar bot-topbar"><a class="brand" href="<?=e($app->path('/admin/'))?>">✳ 满天星<span class="brand-sub">UPDATE CENTER</span></a><a class="button quiet" href="<?=e($app->path('/admin/'))?>">返回包管理</a></header>
 <main class="content bot-page"><div class="page-heading"><div><div class="eyebrow">TELEGRAM SUPPORT</div><h1>让每条消息，都有回应。</h1><p class="muted">用户联系机器人，你在 Telegram 回复。无需公开私人账号，也无需数据库。</p></div><span class="subtle-tag"><?=e($stateLabel)?></span></div>
-<nav class="bot-tabs" aria-label="机器人管理"><a aria-current="page" href="<?=e($app->path('/admin/telegram.php'))?>">连接与客服</a><a href="<?=e($app->path('/admin/telegram-announcements.php'))?>">公告卡片</a><a href="<?=e($app->path('/admin/telegram.php'))?>?view=activities">活动设置</a></nav>
+<nav class="bot-tabs" aria-label="机器人管理"><a aria-current="page" href="<?=e($app->path('/admin/telegram.php'))?>">连接与客服</a><a href="<?=e($app->path('/admin/telegram-announcements.php'))?>">公告卡片</a><a href="<?=e($app->path('/admin/telegram.php'))?>?view=activities">活动设置</a><a href="<?=e($app->path('/admin/telegram.php'))?>?view=conversations">客服会话</a></nav>
 <?php if ($notice): ?><div class="notice <?=$notice['ok']?'success':''?>" role="status"><?=e($notice['text'])?></div><?php endif ?>
-<div class="metrics"><section class="metric"><span>机器人状态</span><strong><?=e($stateLabel)?></strong><small><?=$c['username']?'@'.e($c['username']):'等待 BotFather Token'?></small></section><section class="metric"><span>回复关联</span><strong><?=count($s['routes'])?></strong><small>仅保存消息 ID · 最长 30 天 / 10,000 条</small></section><section class="metric"><span>近期异常</span><strong><?=$failures?></strong><small>最近 100 条处理记录 · 不保存聊天正文</small></section></div>
+<div class="metrics"><section class="metric"><span>机器人状态</span><strong><?=e($stateLabel)?></strong><small><?=$c['username']?'@'.e($c['username']):'等待 BotFather Token'?></small></section><section class="metric"><span>回复关联</span><strong><?=count($s['routes'])?></strong><small>仅保存消息 ID · 最长 30 天 / 10,000 条</small></section><section class="metric"><span>近期异常</span><strong><?=$failures?></strong><small>最近 100 条投递状态 · 正文见客服会话</small></section></div>
 <div class="work-grid"><section class="panel"><div class="section-title"><div><span class="step-number">01</span><h2>连接你的机器人</h2></div></div><p class="muted compact">首次填写 Token 和你的个人数字 ID。你需要先打开机器人，点击 Start。数字 ID 未知时，可在终端运行 <code>php bin/telegram-id.php</code> 按提示获取。</p>
 <form method="post" action="<?=e($app->path('/admin/telegram.php'))?>" class="bot-form"><?php hidden('save') ?>
 <label for="bot-token">Bot Token</label><input id="bot-token" name="token" type="password" autocomplete="new-password" maxlength="150" placeholder="<?=$configured?'已保存；留空保持不变':'粘贴 BotFather 提供的 Token'?>" <?=$configured?'':'required'?> <?=$c['enabled']?'disabled':''?>>

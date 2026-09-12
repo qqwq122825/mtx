@@ -4,7 +4,8 @@ namespace MTX;
 final class TelegramBot
 {
     public readonly TelegramStore $store;
-    public function __construct(private readonly App $app,private readonly TelegramApi $api=new TelegramApi()) { $this->store=new TelegramStore($app->storage); }
+    public readonly TelegramConversations $conversations;
+    public function __construct(private readonly App $app,private readonly TelegramApi $api=new TelegramApi()) { $this->store=new TelegramStore($app->storage);$this->conversations=new TelegramConversations($this->store); }
     public static function id(mixed $id): int
     {
         if ((!is_int($id) && !is_string($id)) || !preg_match('/\A[1-9][0-9]{0,15}\z/',(string)$id) || (int)$id>4503599627370495) throw new Problem(422,'Telegram ID 应为正整数数字 ID。');
@@ -212,7 +213,7 @@ final class TelegramBot
                 return $this->step($s,$id,$step,'sendMessage',$params,$route);
             };
             $replies=TelegramReplies::read($s);
-            $eventPeer=$peer;
+            $eventPeer=$peer;$historyKey=null;$historyStep=null;
             try {
                 if ($click) {
                     // Dismiss the Telegram spinner; an expired acknowledgement must not
@@ -250,16 +251,20 @@ final class TelegramBot
                         else { $s['blocked'][$route['chat_id']]=time();$this->store->save($s);$send('command',$peer,'已屏蔽 #'.$route['chat_id'].'；解除：/unblock '.$route['chat_id']); }
                     } elseif (!$this->supported($m)) $send('command',$peer,'请使用文字、图片、文件、语音、视频或贴纸回复。');
                     else {
+                        $historyKey=$this->conversations->record($c,$id,$route['chat_id'],'out',$m);$historyStep='reply';
                         $this->step($s,$id,'reply','copyMessage',['chat_id'=>$route['chat_id'],'from_chat_id'=>$peer,'message_id'=>$m['message_id']]);
+                        $this->conversations->status($c,$historyKey,'delivered');
                         $target=isset($s['updates'][$id]['steps']['receipt'])?'用户 #'.$route['chat_id']:$this->receiptTarget($c,$route['chat_id']);
                         $send('receipt',$peer,'✅ 已回复 '.$target,silent:true);
                     }
                 } elseif (!$this->supported($m)) $send('command',$peer,'目前支持文字、图片、文件、语音、视频或贴纸，请换一种消息格式。');
                 else {
+                    $historyKey=$this->conversations->record($c,$id,$peer,'in',$m);$historyStep='incoming';
                     [$name,$handle]=$this->identity($m['from']);
                     $body='📩 '.($handle??$name).' 发来新消息'."\n".($handle!==null?'昵称：'.$name:'未设置用户名').' · ID：'.$peer."\n↩️ 回复这张卡片或下方消息即可回信。";
                     $heading=$send('heading',$c['admin_id'],$body,$peer);
                     $this->step($s,$id,'incoming','copyMessage',['chat_id'=>$c['admin_id'],'from_chat_id'=>$peer,'message_id'=>$m['message_id'],'disable_notification'=>true,'reply_parameters'=>['message_id'=>$heading['message_id'],'allow_sending_without_reply'=>true]],$peer);
+                    $this->conversations->status($c,$historyKey,'delivered');
                     // Only acknowledge a confirmed copy. Reserve the cooldown before sending;
                     // a 429 resumes this same step, an ambiguous send is never repeated.
                     if (!array_key_exists('receipt_due',$s['updates'][$id])) {
@@ -282,6 +287,7 @@ final class TelegramBot
                 }
                 $s['updates'][$id]['status']='done';$this->event($s,$id,'delivered',$eventPeer);$this->store->save($s);
             } catch (TelegramApiError $e) {
+                $this->conversations->status($c,$historyKey,($s['updates'][$id]['steps'][$historyStep]['status']??'')==='done'?'delivered':($e->uncertain?'uncertain':($e->apiCode===429?'retry':'failed')));
                 if (isset($s['updates'][$id]['steps']['trial_card']) || ($click['field']??'')==='trial') TelegramTrials::result($s,$id,$e->uncertain?'uncertain':($e->apiCode===429?'reserved':'failed'));
                 if ($e->apiCode===429 && !$e->uncertain) {
                     $s['updates'][$id]['status']='retry';$s['updates'][$id]['retry_at']=time()+max(1,$e->retryAfter);$this->store->save($s);throw new Problem(503,'Telegram 限流，稍后重试。');

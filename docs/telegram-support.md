@@ -21,7 +21,7 @@
 
 ## 消息通知
 
-管理员收到的「新消息」卡片显示用户数字 ID、昵称和 `@用户名`。用户名取自本次消息实际发送者的 [User.username](https://core.telegram.org/bots/api#user)，不使用转发来源的用户名；未设置时标明「未设置用户名」。新消息使用当时的用户名，历史卡片不自动改写。昵称和用户名仅在发送卡片时使用，不额外存入服务器；回复关联仍按数字 ID 判断，用户改名也不会串人。
+管理员收到的「新消息」卡片显示用户数字 ID、昵称和 `@用户名`。用户名取自本次消息实际发送者的 [User.username](https://core.telegram.org/bots/api#user)，不使用转发来源的用户名；未设置时标明「未设置用户名」。新消息使用当时的用户名，历史卡片不自动改写。昵称和用户名可在已开启的客服会话记录中保存；回复关联仍按数字 ID 判断，用户改名也不会串人。
 
 新消息首行显示「📩 @用户名 发来新消息」，第二行显示昵称和数字 ID；无用户名则首行使用昵称，第二行标明「未设置用户名」和 ID。保留“回复这张卡片或下方消息”的提示。
 
@@ -49,6 +49,10 @@
 - 卡片点击只接受本人私聊里由当前机器人发送的消息，按钮数据仅允许问题咨询、合作咨询两个固定类型；群组、其他机器人、陌生数据均忽略。点击沿用屏蔽、限流、去重与重试机制，调用 `answerCallbackQuery` 结束加载提示，随后私聊发出对应文案，不转发成新的客服问题。卡片原文不落盘。
 
 
+## 客服会话列表
+
+后台「客服会话」使用 Element Plus 表格查看后续用户咨询、身份和管理员人工回复，支持搜索、状态筛选、分页及详情。默认保留 30 天 / 最多 5000 条，记录开关与保留期可配置；旧聊天不补抓。见 [会话说明](telegram-conversations.md)。
+
 ## 测试卡活动
 
 后台「Telegram 客服 → 活动设置」（同一个 `telegram.php?view=activities` 地址）提供两小时测试卡预设、库存导入、开关及删除。详见 [活动设置说明](telegram-activities.md)。真实卡密仅导入生产私有库存，不作为源码内置常量提交。该功能不改变欢迎语、咨询按钮、公告或游戏安装器。
@@ -64,7 +68,7 @@
 
 ## 存储和可靠性
 
-`storage/telegram/state.json` 保存配置（含 Token/secret）、数字 ID 关联、去重状态、屏蔽和限流信息；权限 0600，目录 0700，在 public 之外。机器人使用单独的锁和原子 JSON，与包发布锁分离。页面不回显 Token 或 secret，异常不打印 Telegram 原始响应、正文或 API URL。**本服务器不保存聊天正文/媒体；双方的 Telegram 聊天记录仍由 Telegram 保存。**
+`storage/telegram/state.json` 保存配置（含 Token/secret）、数字 ID 关联、去重状态、屏蔽和限流信息；权限 0600，目录 0700，在 public 之外。机器人使用单独的锁和原子 JSON，与包发布锁分离。页面不回显 Token 或 secret，异常不打印 Telegram 原始响应、正文或 API URL。**原投递状态文件不保存聊天正文；新会话功能启用时，在独立私有文件保存后续咨询/人工回复文字和身份。媒体文件不下载，完整附件仍在 Telegram。**
 
 - 回复关联有效 30 天，最多 10,000 条；收到消息时清理过期关联。管理员回复过期记录时提示重新获取会话，不转发给猜测的用户。
 - 去重 ID 保留 3 天，最多 20,000 条；达到上限时暂缓接收，不提前删除近期去重 ID。
@@ -89,6 +93,7 @@
 ```sh
 php tests/telegram.php
 php tests/telegram-trials.php
+php tests/telegram-conversations.php
 PHP_BINARY=php python3 tests/telegram-http.py
 PHP_BINARY=php python3 tests/integration.py
 node tests/upload-ui.test.cjs

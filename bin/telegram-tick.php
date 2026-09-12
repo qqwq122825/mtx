@@ -4,6 +4,8 @@ declare(strict_types=1);
 if (PHP_SAPI!=='cli') exit(1);
 require dirname(__DIR__).'/vendor/autoload.php';
 try {
-    $result=(new MTX\TelegramAnnouncements(new MTX\App()))->tick();
+    $app=new MTX\App();
+    (new MTX\TelegramConversations(new MTX\TelegramStore($app->storage)))->cleanup();
+    $result=(new MTX\TelegramAnnouncements($app))->tick();
     echo json_encode($result,JSON_THROW_ON_ERROR)."\n";
 } catch (Throwable) { fwrite(STDERR,"Telegram scheduler failed. Check configuration and private storage permissions.\n");exit(1); }

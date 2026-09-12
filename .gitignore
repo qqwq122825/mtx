@@ -24,3 +24,5 @@
 /preparer/native/build/
 /preparer/__pycache__/
 /tests/__pycache__/
+
+/frontend/node_modules/

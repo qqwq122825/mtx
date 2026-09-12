@@ -37,6 +37,8 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         check(request('/admin/telegram.php',fields={'action':'save'})[0]==303,'unauthenticated bot changes require login')
         for path in [mount+'/admin/telegram.php','/api/telegram-webhook.php','/storage/telegram/state.json']:
             check(request(origin+path)[0]==404,'bot routes hidden outside mount: '+path)
+        check(request('/admin/telegram.php?view=conversations')[0]==303,'conversation page requires login')
+        check(request('/admin/telegram.php?asset=conversations-js')[0]==303,'conversation assets do not bypass login')
         check(request('/admin/telegram.php?view=activities')[0]==303,'activity page requires password session')
         login=csrf('/admin/login.php');check(request('/admin/login.php',fields={'csrf':login,'password':password})[0]==303,'password login')
         code,html,headers=request('/admin/telegram.php');check(code==200 and headers.get('Cache-Control')=='no-store','bot panel is private and not cached')
@@ -145,5 +147,30 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         check(current['activity'] is None and not current['cards'],'confirmed delete purges activity and plaintext inventory')
         check(request('/src/views/telegram-activities.php')[0]==404 and request('/src/TelegramTrials.php')[0]==404,'activity implementation is not public')
         log.flush();check('HTTP_TRIAL_FIXTURE_' not in (t/'server.log').read_text(),'card plaintext absent from HTTP server logs')
+        inbox='/admin/telegram.php?view=conversations'
+        page=request(inbox)
+        check(page[0]==200 and page[2].get('Cache-Control')=='no-store' and b'conversation-app' in page[1],'conversation page mounts private Element Plus UI')
+        for action in ['conversation_list','conversation_detail','conversation_config']:
+            check(request(inbox,fields={'csrf':'bad','action':action})[0]==403,'conversation action needs CSRF: '+action)
+        for asset,kind in [('conversations-js','text/javascript'),('conversations-css','text/css')]:
+            a=request('/admin/telegram.php?asset='+asset)
+            check(a[0]==200 and a[2]['Content-Type'].startswith(kind),'self-hosted conversation asset through existing route: '+asset)
+        check(request('/admin/telegram.php?asset=../../config.local.php')[0]==404,'asset allowlist rejects traversal')
+        data=request(inbox,fields={'csrf':csrf(inbox),'action':'conversation_list'})
+        check(data[0]==200 and data[2].get('Cache-Control')=='no-store' and json.loads(data[1])['total']==0,'conversation list starts empty without inventing history')
+        import hashlib
+        current=json.loads(statepath.read_text());setting=current['settings'];binding=hashlib.sha256((setting['token']+'|'+str(setting['admin_id'])).encode()).hexdigest()
+        fixture={'schema':1,'binding':binding,'enabled':True,'days':30,'revision':0,'messages':{'900:in':{'id':'900:in','update':900,'peer':88888,'direction':'in','at':int(time.time()),'type':'text','text':'<img src=x onerror=alert(1)>','name':'测试用户','username':'HttpHistoryFixture','status':'delivered','message_id':900,'file_name':''}}}
+        historypath=storage/'telegram/conversations.json';historypath.write_text(json.dumps(fixture));historypath.chmod(0o600)
+        data=json.loads(request(inbox,fields={'csrf':csrf(inbox),'action':'conversation_list','q':'@HttpHistoryFixture'})[1])
+        check(data['total']==1 and data['rows'][0]['username']=='HttpHistoryFixture' and data['rows'][0]['status']=='waiting','authenticated list search returns sender and reply status')
+        detail=request(inbox,fields={'csrf':csrf(inbox),'action':'conversation_detail','peer':'88888'})
+        check(json.loads(detail[1])['messages'][0]['text']==fixture['messages']['900:in']['text'] and token.encode() not in detail[1],'detail returns only scoped message fields without bot credentials')
+        check(b'<img src=x' not in request(inbox)[1],'chat text is not injected into HTML document')
+        check(json.loads(request(inbox,fields={'csrf':csrf(inbox),'action':'conversation_detail','peer':'99999'})[1])['total']==0,'different peer detail excludes unrelated conversation')
+        check(request('/storage/telegram/conversations.json')[0]==404,'history file never served publicly')
+        request(inbox,fields={'csrf':csrf(inbox),'action':'conversation_config','days':'7','revision':'0'})
+        saved=json.loads(historypath.read_text());check(saved['enabled'] is False and saved['days']==7,'privacy controls update separately from bot settings')
+        check(json.loads(statepath.read_text())==current,'history configuration leaves token, trial stock and relay state intact')
         print(f'\n{checks} Telegram HTTP checks passed. No external requests.')
     finally:os.killpg(proc.pid,signal.SIGTERM);proc.wait(timeout=5);log.close()
