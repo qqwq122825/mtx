@@ -3,13 +3,24 @@ declare(strict_types=1);
 namespace MTX;
 final class Security
 {
+    public const SESSION_LIFETIME = 8 * 3600;
+    public const REMEMBER_LIFETIME = 30 * 86400;
+
+    private static function cookieOptions(App $app): array
+    {
+        return ['path' => $app->path('/admin'), 'secure' => !$app->config['local_http'], 'httponly' => true, 'samesite' => 'Strict'];
+    }
+
     public static function session(App $app): void
     {
         session_name('mtx_admin');
         session_save_path($app->storage . '/sessions');
         ini_set('session.use_strict_mode', '1');
         ini_set('session.use_only_cookies', '1');
-        session_set_cookie_params(['lifetime' => 0, 'path' => $app->path('/admin'), 'secure' => !$app->config['local_http'], 'httponly' => true, 'samesite' => 'Strict']);
+        // This application uses a private session directory. PHP's short default
+        // garbage-collection lifetime must not discard remembered logins early.
+        ini_set('session.gc_maxlifetime', (string)self::REMEMBER_LIFETIME);
+        session_set_cookie_params(['lifetime' => 0] + self::cookieOptions($app));
         session_start();
         if (!isset($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(32));
     }
@@ -24,7 +35,7 @@ final class Security
         $token = $_POST['csrf'] ?? '';
         if (!is_string($token) || !hash_equals($_SESSION['csrf'], $token)) throw new Problem(403, '页面令牌已失效，请刷新页面重试。', 'csrf');
     }
-    public static function login(App $app, string $password): void
+    public static function login(App $app, string $password, bool $remember = false): void
     {
         // A separate stable file lock also serializes simultaneous password attempts.
         $lock = fopen($app->storage . '/login.lock', 'c');
@@ -47,8 +58,18 @@ final class Security
             Store::write($path, json_encode($data, JSON_THROW_ON_ERROR));
         } finally { flock($lock, LOCK_UN); fclose($lock); }
         session_regenerate_id(true);
-        $_SESSION = ['authenticated' => true, 'expires' => time() + 8 * 3600, 'csrf' => bin2hex(random_bytes(32)), 'credential' => hash('sha256', $app->config['password_hash'])];
+        $expires = time() + ($remember ? self::REMEMBER_LIFETIME : self::SESSION_LIFETIME);
+        $_SESSION = ['authenticated' => true, 'expires' => $expires, 'csrf' => bin2hex(random_bytes(32)), 'credential' => hash('sha256', $app->config['password_hash'])];
+        // Persist only the opaque session ID, never the password or its hash.
+        // Expiration is also enforced server-side and does not slide on requests.
+        setcookie(session_name(), session_id(), ['expires' => $remember ? $expires : 0] + self::cookieOptions($app));
         $app->store->change(function (&$s) { Store::audit($s, '管理员登录', 'admin'); });
+    }
+    public static function logout(App $app): void
+    {
+        $_SESSION = [];
+        session_destroy();
+        setcookie(session_name(), '', ['expires' => time() - 3600] + self::cookieOptions($app));
     }
     public static function nativeKeys(): array
     {

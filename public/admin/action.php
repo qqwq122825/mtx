@@ -13,7 +13,7 @@ try {
     $key=in_array($action,['create','logout'],true)?'':GameIds::resolve($app->store->read(),$_POST)['app_key'];
     $service=new Releases($app);
     switch ($action) {
-        case 'logout': $_SESSION=[]; session_destroy(); Http::redirect($app->path('/admin/login.php'));
+        case 'logout': Security::logout($app); Http::redirect($app->path('/admin/login.php'));
         case 'create': $key=$service->createGame($_POST); $message='游戏已创建并自动分配 ID，可在当前构建绑定中查看。'; break;
         case 'upload': $id=$service->upload($key,$app->upload('file','tipa'),$_POST); $message='TIPA 检查完成。请查看版本记录，准备完成后再发布。'; break;
         case 'attach': $service->attach($key,Http::text($_POST,'release_id',32),$app->upload('file','tar')); $message='准备产物的结构、身份和摘要校验通过，可确认发布。'; break;
