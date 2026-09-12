@@ -1,0 +1,11 @@
+# /etc/logrotate.d/mtx-prepare; root:root 0644. Adjust path/user.
+/srv/mtx/storage/preparation-cron.log {
+    weekly
+    rotate 4
+    missingok
+    notifempty
+    compress
+    copytruncate
+    su www www
+    create 0600 www www
+}

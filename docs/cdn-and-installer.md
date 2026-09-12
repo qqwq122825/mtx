@@ -36,7 +36,7 @@
 
 ## 发布约定和签名
 
-后台继续采用“上传 TIPA → 上传对应准备产物 TAR → 确认发布”。原有安装机制需要预处理产物，PHP 不运行上传的程序，也不在服务器执行签名工具。后续同游戏更新仅需这两份文件，无须重打安装器；改变游戏/契约/入口/公钥则重打。
+后台采用“上传一个辅助 TIPA → 服务器自动处理 → 确认发布”。原有安装机制需要的内部 TAR 由服务器固定处理组件生成，客户端下载协议不变；包内 iOS 程序不执行。后续同游戏只需上传 TIPA，无须重打安装器；改变游戏/契约/入口/公钥则重打。处理部署及约束见 [自动处理说明](automatic-preparation.md)。
 
 响应保留 Ed25519，并增加 `native_signature_base64`：ECDSA P-256 / SHA-256，签同一份原始 JSON payload，签名 DER X9.62，公钥 X9.63。iOS 主进程和独立助手均使用 Apple Security 验证。实现参考 [Apple 签名与验证](https://developer.apple.com/documentation/security/signing-and-verifying?language=objc)、[PHP openssl_sign](https://www.php.net/openssl-sign)。下载 TIPA 与 TAR 各有签名绑定的 SHA256/长度，TAR 内 Manifest 原始字节摘要也单独签入，助手重新验证而不信任临时目录的自声明哈希。
 

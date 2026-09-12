@@ -87,14 +87,15 @@ GET `/admin/?game_id=1` 管理页（无参数默认三角洲），GET/POST `/adm
 
 - create：新增游戏；name、bundle_id、format。game_id 在文件锁内自动递增分配，忽略客户端指定值；服务端内部关联键与 profile_id 自动生成，显式输入 app_key 或 profile_id 返回 422。ID 一经生成保持不变，停用不回收。
 - upload：multipart file=.tipa、game_id；changelog 为可选后台备注（服务端存储字段名），不进入任何公开更新响应。min_installer_version 和 max_ios 由 Releases 的内部契约固定，提交的同名表单字段被忽略；最低 iOS 仍从 TIPA 读取。
-- attach：multipart file=.tar、game_id、release_id。
+- prepare_retry：game_id、release_id，仅失败草稿可重新排队；正常上传自动排队，无第二文件输入。
+- attach：保留的维护接口，multipart file=.tar、game_id、release_id；后台日常流程不使用。
 - publish：game_id、release_id、revision、confirmed=1；版本 ID 作为幂等操作目标。
 - withdraw：game_id、release_id、revision。
 - republish：game_id、release_id，将完整历史内容复制为新的 ready 草稿。
 - toggle：game_id、revision，启用/停用。
 - logout：退出会话。
 
-普通表单成功后 303 返回管理页；上传控制器使用 X-MTX-Upload:1 获得 JSON {redirect,message} 或结构化错误。自动 Mac 准备任务、独立 worker 接口、进度任务 API 未实施。
+普通表单成功后 303 返回管理页；上传控制器使用 X-MTX-Upload:1 获得 JSON {redirect,message} 或结构化错误。服务器自动准备由私有 CLI `bin/preparation-queue.php` 和 `preparer/worker.py` 完成，没有公开 worker 路由。任务状态仅后台显示，租约 token 和处理错误不进入公开更新响应。
 
 ## 未上线协议收敛
 

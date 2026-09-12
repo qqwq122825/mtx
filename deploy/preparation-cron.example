@@ -1,0 +1,4 @@
+# /etc/cron.d/mtx-prepare; root:root 0644. Adjust path, PHP and user.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+* * * * * www cd /srv/mtx && /usr/bin/python3 preparer/worker.py --php /usr/bin/php >> storage/preparation-cron.log 2>&1

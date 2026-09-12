@@ -50,6 +50,7 @@ final class Releases
         $source = $this->app->saveObject($file);
         $id = bin2hex(random_bytes(16));
         $r = $meta + ['release_id'=>$id,'app_key'=>$key,'sequence'=>null,'state'=>$g['format']==='tipa'?'ready':'draft','source_sha256'=>$source['sha256'],'source_bytes'=>$source['bytes'],'artifact_sha256'=>$g['format']==='tipa'?$source['sha256']:null,'artifact_bytes'=>$g['format']==='tipa'?$source['bytes']:null,'artifact_format'=>$g['format'],'profile_id'=>$g['profile_id'],'max_ios'=>$maxOS,'min_installer_version'=>$minClient,'changelog'=>$log,'created_at'=>gmdate('c'),'published_at'=>null];
+        if ($g['format']==='prepared-payload-v1') $r['preparation']=['status'=>'queued','attempts'=>0];
         return $this->app->store->change(function (&$s) use ($r,$key,$id,$source) {
             self::game($s,$key);
             foreach ($s['releases'] as $existing) if ($existing['app_key']===$key && $existing['source_sha256']===$source['sha256'] && in_array($existing['state'],['draft','ready'],true)) throw new Problem(409, '此源包已有待发布版本，请继续处理原记录。');

@@ -20,3 +20,7 @@
 /playwright-report/
 /test-results/
 *.log
+
+/preparer/native/build/
+/preparer/__pycache__/
+/tests/__pycache__/

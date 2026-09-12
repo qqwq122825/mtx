@@ -15,7 +15,8 @@ try {
     switch ($action) {
         case 'logout': Security::logout($app); Http::redirect($app->path('/admin/login.php'));
         case 'create': $key=$service->createGame($_POST); $message='游戏已创建并自动分配 ID，可在当前构建绑定中查看。'; break;
-        case 'upload': $id=$service->upload($key,$app->upload('file','tipa'),$_POST); $message='TIPA 检查完成。请查看版本记录，准备完成后再发布。'; break;
+        case 'upload': $id=$service->upload($key,$app->upload('file','tipa'),$_POST); $message='TIPA 已接收，服务器将自动处理。无需补传其他文件，完成后即可发布。'; break;
+        case 'prepare_retry': (new MTX\Preparation($app))->retry($key,Http::text($_POST,'release_id',32)); $message='已重新排队自动处理。'; break;
         case 'attach': $service->attach($key,Http::text($_POST,'release_id',32),$app->upload('file','tar')); $message='准备产物的结构、身份和摘要校验通过，可确认发布。'; break;
         case 'publish':
             if (Http::text($_POST,'confirmed',1)!=='1') throw new Problem(422,'请先确认已完成对应安装器的兼容测试。');
