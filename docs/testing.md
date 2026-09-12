@@ -64,3 +64,11 @@ macOS；PHP 8.5.1；Python 3.11.14；Node 24.9.0（仅测试）；Xcode 16.1。�
 按尚未上线的项目处理，不以任何旧测试安装器为兼容目标。删除 bin/upgrade.php 和自动补齐 ID 的代码；新 setup 直接生成正确状态。管理员操作一并改成数字 ID，内部存储关联键继续关联当前包，不重新编号、不删除本机已上传包。
 
 原工程 Build/GameIDOnlyBaseline-* 保存本轮修改前源码、公开绑定和 0.8.2 / build 18 安装器；最新构建为 0.8.3 / build 19。
+
+## Telegram 客服接入复测
+
+- `php tests/telegram.php`：73 项，假 Telegram API 验证用户卡片/复制转发、管理员回复、多用户隔离、附件、屏蔽/解除、限流、重复及并发 Webhook、已完成步骤去重、429 恢复、超时/进程中断结果待确认、错误接入不显示启用、数字 ID 获取。没有发出真实 Telegram 消息。
+- `tests/telegram-http.py`：29 项，本机真实 PHP HTTP 验证登录/CSRF、配置保存、Token/secret 不回显、随机路径、头校验、256 KiB 限制、仅 POST、暂停、群消息忽略、localhost 阻止注册。
+- 原 157 项包发布集成和 7 项上传 UI 回归通过；未修改原安装器源码/产物。
+- 浏览器检查了客服入口和 421px 移动布局，修复了客服入口与新增游戏按钮重叠。当前显示“待配置”，未填写真实 Token / 管理员 ID。
+- 真实机器人收发、公网 HTTPS、CDN/Nginx 新路由及 Telegram 出站连接等待部署后验证。

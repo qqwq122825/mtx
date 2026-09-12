@@ -19,7 +19,7 @@ server {
     client_body_timeout 300s;
 
     location = /RANDOM_ENTRY { return 302 /RANDOM_ENTRY/admin/; }
-    location ~ ^/RANDOM_ENTRY(/|/admin(/(index|login|action)\.php|/)?)$ {
+    location ~ ^/RANDOM_ENTRY(/|/admin(/(index|login|action|telegram)\.php|/)?)$ {
         limit_req zone=mtx_admin burst=15 nodelay;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root/index.php;
@@ -27,6 +27,18 @@ server {
         fastcgi_param HTTPS on;
         fastcgi_pass unix:/run/php/php8.5-fpm.sock;
         fastcgi_read_timeout 600s;
+    }
+    # Telegram uses a secret header, not a query-string token. No CDN challenges/cache.
+    location = /RANDOM_ENTRY/api/telegram-webhook.php {
+        client_max_body_size 256k;
+        limit_req zone=mtx_api burst=30 nodelay;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param HTTPS on;
+        fastcgi_pass unix:/run/php/php8.5-fpm.sock;
+        fastcgi_read_timeout 90s;
+        access_log off;
     }
     location ~ ^/RANDOM_ENTRY/api/(update|download-ticket|download)\.php$ {
         limit_req zone=mtx_api burst=30 nodelay;

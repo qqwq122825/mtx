@@ -14,6 +14,7 @@
 | 路径 | 缓存 | 规则 |
 |---|---|---|
 | `/<入口>/admin*` | Bypass / no-store | 优先 IP 白名单；可使用浏览器挑战；保留 POST、Cookie 和 CSRF 字段 |
+| `/<入口>/api/telegram-webhook.php` | Bypass | POST JSON，保留 X-Telegram-Bot-Api-Secret-Token，256 KiB 上限，无挑战/跳转 |
 | `/<入口>/api/update.php` | Bypass | 含 nonce 的动态签名响应；禁止 JS 挑战、HTML 注入、缓存、重定向 |
 | `/<入口>/api/download-ticket.php` | Bypass | POST JSON；禁止挑战、缓存、重定向 |
 | `/<入口>/api/download.php` | Bypass | 保留查询参数、Range、Content-Length；不修改字节；禁挑战和重定向 |

@@ -63,3 +63,9 @@ unset MTX_PASSWORD
 所有游戏共用 `/<随机入口>/api/update.php`，通过 game_id 区分。后台创建游戏时自动分配递增 ID，现有三角洲为 1；固定 ID 随 state.json 和 next_game_id 一起备份。不要手动重编号或重建已有站点状态。
 
 `php bin/package-private.php --url https://mtx.jk92.cc` 导出配套 PRIVATE 包，包含当前游戏目录、ID 计数器、对应密码摘要及密钥，但没有版本、包文件或发布指针。仅用于新站首次部署，旧站保留自己的配置与 storage。安装器用 `bin/export-installer.php --game-id ID --url https://mtx.jk92.cc --out /完整路径/MTXRemote.generated.h` 导出公开配置后重新构建。
+
+## 8. Telegram 客服
+
+部署更新后的 `public`、`src` 和 Nginx 示例规则：后台新增 `/<随机入口>/admin/telegram.php`，Webhook 为 `/<随机入口>/api/telegram-webhook.php`。启用 PHP curl，允许出站访问 api.telegram.org:443；Webhook 在 CDN 上不缓存、不挑战，保留 secret 校验头。生产后台填 Token / 个人数字 ID 后启用。
+
+机器人配置和关联记录在 `storage/telegram/`，更新时保留，备份时按密钥级别保护。首次部署压缩包不携带该目录的配置和历史。详见 [Telegram 客服说明](../docs/telegram-support.md)。
