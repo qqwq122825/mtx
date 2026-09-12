@@ -37,7 +37,9 @@ final class TelegramBot
                 }
                 $draft=$s['settings']['token']==='' ? ($s['announcements']??null) : null;
                 $replies=$s['settings']['token']==='' ? ($s['auto_replies']??null) : null;
+                $trials=$s['trials']??null;
                 $s=TelegramStore::emptyState();
+                if ($trials) { if ($trials['activity']) $trials['activity']['enabled']=false; $trials['revision']++; $s['trials']=$trials; }
                 // A draft prepared before initial BotFather setup should survive that first binding.
                 if ($draft) {$s['announcements']=TelegramAnnouncements::defaults();$s['announcements']['card']=$draft['card'];$s['announcements']['card']['schedule_enabled']=false;$s['announcements']['revision']=$draft['revision'];}
                 if ($replies) $s['auto_replies']=$replies;
@@ -150,13 +152,13 @@ final class TelegramBot
     {
         if (!is_array($query) || !is_string($query['id']??null) || !preg_match('/\A[\x21-\x7e]{1,256}\z/D',$query['id'])) return null;
         $from=$query['from']??[];$message=$query['message']??[];$data=$query['data']??null;
-        if (!is_string($data) || !preg_match('/\Amtx:reply:(question|cooperation)\z/D',$data,$match)) return null;
+        if (!is_string($data) || !preg_match('/\Amtx:(?:reply:(question|cooperation)|trial:([a-f0-9]{16}))\z/D',$data,$match)) return null;
         if (($from['is_bot']??true)!==false || !is_int($from['id']??null) || $from['id']<=0 || ($message['chat']['type']??'')!=='private' || ($message['chat']['id']??null)!==$from['id']) return null;
         if (($message['from']['is_bot']??false)!==true || ($message['from']['id']??null)!==(int)explode(':',$settings['token'],2)[0] || !is_int($message['message_id']??null) || $message['message_id']<1 || isset($query['inline_message_id'])) return null;
-        return ['id'=>$query['id'],'peer'=>$from['id'],'field'=>$match[1]];
+        return ['id'=>$query['id'],'peer'=>$from['id'],'field'=>$match[1]?:'trial','activity'=>$match[2]??null];
     }
     /** Store intent before each non-idempotent API call; never blindly resend an ambiguous call. */
-    private function step(array &$s,int $update,string $step,string $method,array $params,?int $routePeer=null): array|bool
+    private function step(array &$s,int $update,string $step,string $method,#[\SensitiveParameter] array $params,?int $routePeer=null): array|bool
     {
         $job=&$s['updates'][$update];
         if (isset($job['steps'][$step])) {
@@ -204,7 +206,7 @@ final class TelegramBot
                 if (!$admin && (isset($s['blocked'][$peer]) || $rate['count']>10)) { $s['updates'][$id]['status']='done';$this->event($s,$id,'filtered',$peer);$this->store->save($s);return; }
                 $this->store->save($s);
             }
-            $send=function (string $step,int $chat,string $body,?int $route=null,?array $keyboard=null,bool $silent=false) use (&$s,$id) {
+            $send=function (string $step,int $chat,#[\SensitiveParameter] string $body,?int $route=null,?array $keyboard=null,bool $silent=false) use (&$s,$id) {
                 $params=['chat_id'=>$chat,'text'=>$body,'link_preview_options'=>['is_disabled'=>true],'disable_notification'=>$silent];
                 $params['reply_markup']=$keyboard??['remove_keyboard'=>true];
                 return $this->step($s,$id,$step,'sendMessage',$params,$route);
@@ -216,14 +218,23 @@ final class TelegramBot
                     // Dismiss the Telegram spinner; an expired acknowledgement must not
                     // prevent the actual reply. Content delivery still uses step journaling.
                     try { $this->api->call($c['token'],'answerCallbackQuery',['callback_query_id'=>$click['id']]); } catch (TelegramApiError) {}
-                    $send('quick_reply',$peer,$replies[$click['field']]);
+                    if ($click['field']==='trial') {
+                        // Lock + persisted reservation prevents concurrent clicks from sharing a card.
+                        // Only a fresh, explicit click may re-display the same daily allocation.
+                        $decision=TelegramTrials::reserve($s,$peer,$id,$click['activity'],time());
+                        $this->store->save($s);
+                        $sent=$send('trial_card',$peer,TelegramTrials::body($s,$decision,$peer));
+                        if ($decision['kind']==='card') TelegramTrials::result($s,$id,'delivered',$sent['message_id']);
+                    } else $send('quick_reply',$peer,$replies[$click['field']]);
                 } elseif (preg_match('/\A\/(start|help|id)(?:@[A-Za-z0-9_]+)?(?:\s.*)?\z/s',$text,$match)) {
                     $body=match($match[1]) {
                         'id'=>'你的 Telegram 数字 ID：'.$peer,
                         'help'=>$admin?'客服管理：对用户消息或会话卡片使用“回复”即可回信。回复会话发送 /block 可屏蔽；/unblock 数字ID 解除；回复 /who 查看用户 ID。':$replies['welcome'],
                         default=>$replies['welcome'],
                     };
-                    $send('command',$peer,$body,null,$match[1]==='id' || ($admin && $match[1]==='help')?null:TelegramReplies::keyboard());
+                    $keyboard=TelegramReplies::keyboard();
+                    if ($button=TelegramTrials::button($s)) $keyboard['inline_keyboard'][]=[$button];
+                    $send('command',$peer,$body,null,$match[1]==='id' || ($admin && $match[1]==='help')?null:$keyboard);
                 } elseif (isset(TelegramReplies::BUTTONS[$text]) && (!$admin || !isset($m['reply_to_message']))) {
                     $send('quick_reply',$peer,$replies[TelegramReplies::BUTTONS[$text]]);
                 } elseif ($admin) {
@@ -271,6 +282,7 @@ final class TelegramBot
                 }
                 $s['updates'][$id]['status']='done';$this->event($s,$id,'delivered',$eventPeer);$this->store->save($s);
             } catch (TelegramApiError $e) {
+                if (isset($s['updates'][$id]['steps']['trial_card']) || ($click['field']??'')==='trial') TelegramTrials::result($s,$id,$e->uncertain?'uncertain':($e->apiCode===429?'reserved':'failed'));
                 if ($e->apiCode===429 && !$e->uncertain) {
                     $s['updates'][$id]['status']='retry';$s['updates'][$id]['retry_at']=time()+max(1,$e->retryAfter);$this->store->save($s);throw new Problem(503,'Telegram 限流，稍后重试。');
                 }

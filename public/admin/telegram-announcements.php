@@ -44,7 +44,7 @@ $deletionLabels=['none'=>'不删除','waiting'=>'等待删除','pending'=>'删�
 <header class="topbar bot-topbar"><a class="brand" href="<?=e($app->path('/admin/'))?>">✳ 满天星<span class="brand-sub">UPDATE CENTER</span></a><a class="button quiet" href="<?=e($app->path('/admin/telegram.php'))?>">机器人连接</a></header>
 <main class="content bot-page announcement-page">
 <div class="page-heading"><div><div class="eyebrow">TELEGRAM / ANNOUNCEMENT</div><h1>机器人公告</h1><p class="muted">编辑卡片、定时投递、到时删除。</p></div><span class="subtle-tag"><?=$a['card']['schedule_enabled']?'定时发送已开启':'定时发送已关闭'?></span></div>
-<nav class="bot-tabs" aria-label="机器人管理"><a href="<?=e($app->path('/admin/telegram.php'))?>">连接与客服</a><a aria-current="page" href="<?=e($app->path('/admin/telegram-announcements.php'))?>">公告卡片</a></nav>
+<nav class="bot-tabs" aria-label="机器人管理"><a href="<?=e($app->path('/admin/telegram.php'))?>">连接与客服</a><a aria-current="page" href="<?=e($app->path('/admin/telegram-announcements.php'))?>">公告卡片</a><a href="<?=e($app->path('/admin/telegram.php'))?>?view=activities">活动设置</a></nav>
 <?php if ($notice): ?><div class="notice <?=$notice['ok']?'success':'error'?>" role="status"><?=e($notice['text'])?></div><?php endif ?>
 <div class="announcement-grid"><section class="panel"><div class="section-title"><h2>编辑公告</h2><span class="muted">保存后再发送</span></div>
 <form method="post" class="announcement-form" id="announcement-form" action="<?=e($app->path('/admin/telegram-announcements.php'))?>"><?php hidden('save') ?>

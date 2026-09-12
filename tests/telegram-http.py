@@ -37,6 +37,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         check(request('/admin/telegram.php',fields={'action':'save'})[0]==303,'unauthenticated bot changes require login')
         for path in [mount+'/admin/telegram.php','/api/telegram-webhook.php','/storage/telegram/state.json']:
             check(request(origin+path)[0]==404,'bot routes hidden outside mount: '+path)
+        check(request('/admin/telegram.php?view=activities')[0]==303,'activity page requires password session')
         login=csrf('/admin/login.php');check(request('/admin/login.php',fields={'csrf':login,'password':password})[0]==303,'password login')
         code,html,headers=request('/admin/telegram.php');check(code==200 and headers.get('Cache-Control')=='no-store','bot panel is private and not cached')
         check(b'type="password"' in html and b'name="admin_id"' in html and b'/admin/telegram.php' in html,'password Token input and prefixed action')
@@ -110,5 +111,39 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         state=json.loads(statepath.read_text());state['announcements']['card']['schedule_enabled']=True;state['announcements']['next_at']=int(time.time())+3600;statepath.write_text(json.dumps(state))
         check(request(ann,fields={'csrf':csrf(ann),'action':'pause'})[0]==303 and not json.loads(statepath.read_text())['announcements']['card']['schedule_enabled'],'pause schedule through authenticated HTTP')
         check(request(ann,method='PUT')[0]==405,'announcement mutations accept POST only')
+        activity='/admin/telegram.php?view=activities'
+        page=request(activity)
+        check(page[0]==200 and page[2].get('Cache-Control')=='no-store' and '活动设置'.encode() in page[1],'activity panel is served privately on existing admin route')
+        check(request(activity,method='PUT')[0]==405,'activity mutation rejects PUT')
+        for action in ['trial_save','trial_import','trial_pause','trial_delete']:
+            check(request(activity,fields={'csrf':'bad','action':action})[0]==403,'activity action requires CSRF: '+action)
+        def trial_fields(action,**extra):
+            revision=json.loads(statepath.read_text()).get('trials',{}).get('revision',0)
+            return {'csrf':csrf(activity),'action':action,'revision':str(revision)}|extra
+        before=json.loads(statepath.read_text())
+        check(request(activity,fields=trial_fields('trial_save',title='领取 <tag> 测试卡'))[0]==303,'create paused activity preset through HTTP')
+        current=json.loads(statepath.read_text())
+        check(not current['trials']['activity']['enabled'] and current['settings']==before['settings'] and current['auto_replies']==before['auto_replies'] and current['announcements']==before['announcements'],'activity save leaves bot, replies and announcements untouched')
+        check(b'&lt;tag&gt;' in request(activity)[1],'activity title is HTML escaped')
+        fixture_cards='HTTP_TRIAL_FIXTURE_001\nHTTP_TRIAL_FIXTURE_002'
+        check(request(activity,fields=trial_fields('trial_import',codes=fixture_cards))[0]==303,'import synthetic inventory through password panel')
+        page=request(activity)[1]
+        check(b'HTTP_TRIAL_FIXTURE_' not in page and b'id="trial-codes"' in page,'inventory plaintext not echoed after import')
+        current=json.loads(statepath.read_text());check(len(current['trials']['cards'])==2,'two cards saved privately')
+        request(activity,fields=trial_fields('trial_import',codes=fixture_cards))
+        check(len(json.loads(statepath.read_text())['trials']['cards'])==2,'duplicate HTTP import does not multiply stock')
+        request(activity,fields=trial_fields('trial_save',title='领取单透测试卡',enabled='1'))
+        check(json.loads(statepath.read_text())['trials']['activity']['enabled'],'admin can enable stocked activity without sending messages')
+        stale=trial_fields('trial_save',title='stale form',enabled='1')
+        request(activity,fields=trial_fields('trial_pause'))
+        request(activity,fields=stale)
+        check(not json.loads(statepath.read_text())['trials']['activity']['enabled'] and '配置已变化'.encode() in request(activity)[1],'stale form does not reactivate a paused activity')
+        request(activity,fields=trial_fields('trial_delete',confirm_delete='bad'))
+        check(len(json.loads(statepath.read_text())['trials']['cards'])==2,'delete rejected without typed confirmation')
+        request(activity,fields=trial_fields('trial_delete',confirm_delete='删除活动'))
+        current=json.loads(statepath.read_text())['trials']
+        check(current['activity'] is None and not current['cards'],'confirmed delete purges activity and plaintext inventory')
+        check(request('/src/views/telegram-activities.php')[0]==404 and request('/src/TelegramTrials.php')[0]==404,'activity implementation is not public')
+        log.flush();check('HTTP_TRIAL_FIXTURE_' not in (t/'server.log').read_text(),'card plaintext absent from HTTP server logs')
         print(f'\n{checks} Telegram HTTP checks passed. No external requests.')
     finally:os.killpg(proc.pid,signal.SIGTERM);proc.wait(timeout=5);log.close()
