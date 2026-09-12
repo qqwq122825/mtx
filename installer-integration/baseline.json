@@ -29,7 +29,7 @@
   },
   "Tests/test_packaging.py": {
     "before": "3c59ea25a93c98a2fc86b9a3c796b051e81d128706e3cee7b23f2e8d22c6d98d",
-    "after": "ea6be9a753d4bb99000160646193ee5ffaeb1e94e2d37daf09a6a79ff116c3ed"
+    "after": "55e882d1d39ecf548be067a388939daf58fda554f4b5b6d99f7871be1fe5c049"
   },
   "Tests/test_payload.py": {
     "before": "528347caa53882e50a038a3bbf8956b9b321613171cc462f5e0ed045428eaccf",
@@ -37,7 +37,7 @@
   },
   "Tests/test_remote_update.py": {
     "before": null,
-    "after": "f1ab3b9e3ddafc5236177a996bf88a38ca20b997ef302d380d804aa5482fddba"
+    "after": "254810aeb5bbdb30015b5dbca190773aa5b9a3cd719c64621dd6e64445006182"
   },
   "Tools/package_installer.sh": {
     "before": "d8de9c702564e66808faf9cb35e408f4ba9865bbbf5fb40f11d5268d79c1b7fb",
@@ -49,7 +49,7 @@
   },
   "TrollInstallerX.xcodeproj/project.pbxproj": {
     "before": "5d29c87483d66b5325cc1afc4a56fe370f4aa434cda6fc68589476e200418919",
-    "after": "20f07c01854be2b7df3861e2aca7eb7d8e78d065d635aee8098b92b3de59877c"
+    "after": "0997460a53a74b08d828ad7d94b405e7db96a5ebc96c55a6653ed8c100b6bda2"
   },
   "TrollInstallerX/Installer/Installation.swift": {
     "before": "76c2eb218bae30fde032b817622954d7cbd819acb9faeb4ba21bb79b2a703d30",
@@ -81,7 +81,7 @@
   },
   "TrollInstallerX/UI/MainView.swift": {
     "before": "b85c611d069f4837e871867888904b785aa038a7c19449fb3809b5ddba9da2d5",
-    "after": "facb3000abea88295a1a24e7dc060c62e756ae64a506df25b109e361dec2573d"
+    "after": "f4caaff3aa9d510a4487e2dea15d38f30cfeb8cf31fcf55ca73ec3a16949d706"
   },
   "build.sh": {
     "before": "7b11cbdff01e6a0852fb240bae7796f05a3847459f6ac79f136bb6b48fd87d25",

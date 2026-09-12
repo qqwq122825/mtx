@@ -40,7 +40,7 @@ payload：schema_version=1、app_key、原请求 nonce、issued_at、expires_at�
 - up_to_date：已安装序号等于当前发布，附 release。
 - update_available：已安装序号低于当前发布，附 release。
 
-release 字段：release_id、sequence、display_version、bundle_version、bundle_id、profile_id、artifact_format、artifact_id（64 位 SHA-256，与 artifact_sha256 相同）、artifact_bytes、artifact_sha256、source_sha256、source_bytes、manifest_sha256（prepared 格式的 Manifest.plist 原始字节摘要）、min_installer_version、min_ios、max_ios、changelog、published_at。
+release 字段：release_id、sequence、display_version、bundle_version、bundle_id、profile_id、artifact_format、artifact_id（64 位 SHA-256，与 artifact_sha256 相同）、artifact_bytes、artifact_sha256、source_sha256、source_bytes、manifest_sha256（prepared 格式的 Manifest.plist 原始字节摘要）、min_installer_version、min_ios、max_ios、published_at。
 
 响应有效期 10 分钟，Cache-Control=no-store。客户端必须核对 nonce、有效时间、固定 app_key/Bundle ID/profile/允许格式、大小和摘要；本地维护每个 app 的最高已验证 sequence 防止旧响应被接纳。0.8.0 原生安装器已接入签名、nonce、时间和游戏契约校验；UserDefaults 已观察序号不是抵抗容器删除的硬件防回滚。
 
@@ -82,7 +82,7 @@ release 字段：release_id、sequence、display_version、bundle_version、bund
 GET `/admin/` 管理页，GET/POST `/admin/login.php` 登录；所有写操作统一为 POST `/admin/action.php`，必须带登录会话、CSRF 和 action：
 
 - create：新增游戏；app_key、name、bundle_id、format、profile_id。
-- upload：multipart file=.tipa、app_key、changelog、max_ios、min_installer_version。
+- upload：multipart file=.tipa、app_key；changelog 为可选后台备注（兼容历史存储字段名），不进入任何公开更新响应。min_installer_version 和 max_ios 由 Releases 的内部契约固定，提交的同名表单字段被忽略；最低 iOS 仍从 TIPA 读取。
 - attach：multipart file=.tar、app_key、release_id。
 - publish：app_key、release_id、revision、confirmed=1；版本 ID 作为幂等操作目标。
 - withdraw：app_key、release_id、revision。

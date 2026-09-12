@@ -4,20 +4,20 @@
   "installer_binding": {
     "app_key": "mtx-dfm-cn",
     "display_name": "满天星三角洲国服",
-    "update_url": "https://updates.example.com/api/update.php?app=mtx-dfm-cn",
+    "update_url": "https://updates.example.com/RANDOM_ENTRY/api/update.php?app=mtx-dfm-cn",
     "expected_bundle_id": "com.mtx.scmtxdfm",
     "profile_id": "mtx-dfm-remote-v1",
     "trusted_public_keys": {
       "release-2026": null
     },
     "allowed_download_hosts": [
-      "downloads.example.com"
+      "updates.example.com"
     ]
   },
   "request_parameters": {
     "app": "mtx-dfm-cn",
     "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "installer_version": "0.8.0",
+    "installer_version": "0.8.1",
     "os_version": "16.1.2",
     "profile": "mtx-dfm-remote-v1"
   },
@@ -42,16 +42,17 @@
       "artifact_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "source_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
       "min_installer_version": "0.8.0",
-      "min_ios": "14.0",
+      "min_ios": "14.0.0",
       "max_ios": "16.6.1",
-      "changelog": "示例更新说明。",
-      "published_at": "2026-09-12T08:00:00Z"
+      "published_at": "2026-09-12T08:00:00Z",
+      "source_bytes": 10000,
+      "manifest_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
     }
   },
   "future_game_binding": {
     "app_key": "mtx-arena-cn",
     "display_name": "满天星暗区突围国服",
-    "update_url": "https://updates.example.com/api/update.php?app=mtx-arena-cn",
+    "update_url": "https://updates.example.com/RANDOM_ENTRY/api/update.php?app=mtx-arena-cn",
     "expected_bundle_id": null,
     "profile_id": null,
     "enabled": false,

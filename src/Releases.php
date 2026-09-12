@@ -3,6 +3,10 @@ declare(strict_types=1);
 namespace MTX;
 final class Releases
 {
+    // Fixed installer contract, not per-upload form fields. Existing records keep
+    // their captured compatibility values; future dedicated builds update these.
+    private const MIN_INSTALLER_VERSION = '0.8.0';
+    private const MAX_IOS = '16.6.1';
     public function __construct(private readonly App $app) {}
     public static function game(array $s, string $key): array
     {
@@ -37,11 +41,11 @@ final class Releases
     {
         $g = self::game($this->app->store->read(), $key);
         $meta = Packages::tipa($file, $g['bundle_id']);
-        $maxOS = Packages::version(Http::text($input, 'max_ios', 12));
-        $minClient = Packages::version(Http::text($input, 'min_installer_version', 12));
+        $maxOS = self::MAX_IOS;
+        $minClient = self::MIN_INSTALLER_VERSION;
         if (version_compare($maxOS, $meta['min_ios'], '<')) throw new Problem(422, '最高系统版本低于包内最低系统要求。');
-        $log = Http::text($input, 'changelog', 5000);
-        if (trim($log) === '') throw new Problem(422, '请填写本次更新说明。');
+        // Keep the storage key for existing records, but never include it in wire().
+        $log = trim(Http::text($input, 'changelog', 5000));
         $source = $this->app->saveObject($file);
         $id = bin2hex(random_bytes(16));
         $r = $meta + ['release_id'=>$id,'app_key'=>$key,'sequence'=>null,'state'=>$g['format']==='tipa'?'ready':'draft','source_sha256'=>$source['sha256'],'source_bytes'=>$source['bytes'],'artifact_sha256'=>$g['format']==='tipa'?$source['sha256']:null,'artifact_bytes'=>$g['format']==='tipa'?$source['bytes']:null,'artifact_format'=>$g['format'],'profile_id'=>$g['profile_id'],'max_ios'=>$maxOS,'min_installer_version'=>$minClient,'changelog'=>$log,'created_at'=>gmdate('c'),'published_at'=>null];
@@ -124,7 +128,7 @@ final class Releases
     }
     public static function wire(array $r): array
     {
-        $fields=['release_id','sequence','display_version','bundle_version','bundle_id','profile_id','artifact_format','artifact_bytes','artifact_sha256','source_sha256','source_bytes','manifest_sha256','min_installer_version','min_ios','max_ios','changelog','published_at'];
+        $fields=['release_id','sequence','display_version','bundle_version','bundle_id','profile_id','artifact_format','artifact_bytes','artifact_sha256','source_sha256','source_bytes','manifest_sha256','min_installer_version','min_ios','max_ios','published_at'];
         return array_intersect_key($r,array_flip($fields))+['artifact_id'=>$r['artifact_sha256']];
     }
 }

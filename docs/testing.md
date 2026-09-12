@@ -8,16 +8,16 @@ macOS；PHP 8.5.1；Python 3.11.14；Node 24.9.0（仅测试）；Xcode 16.1。�
 
 ## 自动验证
 
-- `tests/integration.py`：**116 项 HTTP/集成检查**。密码、CSRF、Cookie、限流、配置轮换、ZIP/Plist/TAR、发布并发/下架、Ed25519/P-256、摘要、Range、票据等。
+- `tests/integration.py`：**122 项 HTTP/集成检查**。密码、CSRF、Cookie、限流、配置轮换、ZIP/Plist/TAR、发布并发/下架、Ed25519/P-256、摘要、Range、票据等。
 - 新增随机路径隔离、页面资源/表单正确前缀、Cookie 子目录、真实 TIPA 源下载及新旧票据失效用例。
 - `tests/upload-ui.test.cjs`：**7 项**，随机前缀上传动作、进度、服务器异常、外站重定向拦截。
 - `tests/installer-update.py --installer /工程路径/TrollInstallerX`：**48 项原生客户端检查**。现场生成临时 P-256 密钥，PHP 签名，编译实际 Swift 下载器与 Objective-C 校验器，连接本机 HTTP fixture（HTTP 仅在测试编译标志下开放）。
 - 原生覆盖：TIPA 先于 TAR、字节进度、本地原包字节一致、缓存复用、错误签名/nonce/游戏/过期信息、无发布、短包/坏摘要、重定向/外站票据、坏清单摘要、TAR 路径穿越、旧序号、下载期间发布变化。失败的 TIPA 不触发后续 TAR 下载，临时分片清理。
 - 不可变资源交给助手后，再次校验正常签名；修改文件/Manifest/凭证，或删除凭证，均拦截。
-- 原工程 `Tests/run_tests.sh`：**45 个 Python 测试**；主机事务、间接事务、宿主选择的断言检查，以及日志保存/导出、纯下载错误隐藏日志、选择取消/超时/100 轮并发点击测试通过。
+- 原工程 `Tests/run_tests.sh`：**46 个 Python 测试**；主机事务、间接事务、宿主选择的断言检查，以及日志保存/导出、纯下载错误隐藏日志、选择取消/超时/100 轮并发点击测试通过。
 - PHP/JS 语法、Composer 锁定依赖审计通过。
 - `installer-integration/remote-update.patch` 在临时基线应用后，所有文件摘要匹配；重复执行幂等。
-- iOS Release 构建成功；新产物 `MTXInstaller-remote-unsigned.tipa` 为 **0.8.0 / build 16**。外层待用户签名，内层依旧走现有准备机制。
+- iOS Release 构建成功；新产物 `MTXInstaller-remote-unsigned.tipa` 为 **0.8.1 / build 17**。供用户通过巨魔安装，真实设备行为仍待测试；内层依旧走现有准备机制。
 
 ## 浏览器验证
 
@@ -41,3 +41,11 @@ macOS；PHP 8.5.1；Python 3.11.14；Node 24.9.0（仅测试）；Xcode 16.1。�
 - 256 MiB 附近压力、磁盘耗尽、突然断电；自动 Mac 产物准备 worker。
 
 公开部署压缩包不含配置/密钥/包；另生成的 PRIVATE 部署包含与安装器匹配的私有配置，只用于首次新站部署与离线备份，不上传 Git。生产初始无已发布版本。
+
+## 一键流程简化复测
+
+- 上传表单无最低安装器版本/最高 iOS 输入；不填备注直接上传成功，伪造表单版本字段不改变内部契约。
+- 后台备注正确转义，公开签名响应不含备注（包含历史记录的 changelog 字段）。
+- 浏览器检查上传区域：仅文件、可选后台备注、上传按钮；备注无 required 属性。
+- 安装按钮直接调用下载入口，删除前置安装弹窗；保留最终系统 App 选择/替换确认。源码回归与 iOS Release 构建通过。
+- 修改前的远程安装器及相关源码已备份到原工程 Build/SimpleFlowBaseline-*，不触及源 TIPA。

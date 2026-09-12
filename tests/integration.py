@@ -55,8 +55,8 @@ class Client:
         values = {'csrf': self.csrf(), 'action': action, 'app_key': key, **fields}
         return self.request('/admin/action.php', fields=values, file=file)
 
-def make_tipa(build='1', bundle='com.mtx.scmtxdfm', binary=True, extra=None):
-    info = {'CFBundleIdentifier': bundle, 'CFBundleName': 'Fixture', 'CFBundleDisplayName': '测试游戏', 'CFBundleShortVersionString': '1.0', 'CFBundleVersion': build, 'MinimumOSVersion': '14.0', 'CFBundleExecutable': 'Fixture'}
+def make_tipa(build='1', bundle='com.mtx.scmtxdfm', binary=True, extra=None, minimum='14.0'):
+    info = {'CFBundleIdentifier': bundle, 'CFBundleName': 'Fixture', 'CFBundleDisplayName': '测试游戏', 'CFBundleShortVersionString': '1.0', 'CFBundleVersion': build, 'MinimumOSVersion': minimum, 'CFBundleExecutable': 'Fixture'}
     out = io.BytesIO()
     with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
         z.writestr('Payload/Fixture.app/Info.plist', plistlib.dumps(info, fmt=plistlib.FMT_BINARY if binary else plistlib.FMT_XML))
@@ -139,15 +139,18 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
             code, data, _ = client.action('upload',file=(name,raw),min_installer_version='0.8.0',max_ios='16.6.1',changelog='test')
             check(code == 422, 'invalid upload rejected: '+name+' '+str(code))
         check(len(state()['releases']) == 0,'failed uploads never create releases')
-        check(client.action('upload',file=('fixture.tipa',source1),min_installer_version='0.8.0',max_ios='13.0',changelog='test')[0] == 422,'inverted OS range rejected')
-        code, data, _ = client.action('upload',file=('fixture.tipa',source1),min_installer_version='0.8.0',max_ios='16.6.1',changelog='<script>alert(1)</script> 发布测试')
+        check(client.action('upload',file=('new-ios.tipa',make_tipa(minimum='17.0')),max_ios='99.0',changelog='test')[0] == 422,'internal OS range rejects unsupported source regardless of form override')
+        code, data, _ = client.action('upload',file=('fixture.tipa',source1),changelog='<script>alert(1)</script> 后台私有备注')
         check(code == 200, 'binary plist TIPA upload: '+data.decode()[:180])
         r1 = next(iter(state()['releases'])); release1 = state()['releases'][r1]
+        check(release1['min_installer_version']=='0.8.0' and release1['max_ios']=='16.6.1', 'compatibility captured internally without form fields')
         check(release1['state'] == 'draft' and release1['bundle_version'] == '1', 'TIPA creates draft and parses metadata')
         check(client.action('upload',file=('fixture.tipa',source1),min_installer_version='0.8.0',max_ios='16.6.1',changelog='repeat')[0] == 409, 'duplicate pending upload rejected')
         check(client.action('publish',release_id=r1,revision=0,confirmed=1)[0] == 409,'draft cannot publish')
         check(update()[0]['status'] == 'no_release','unprepared source stays private')
         page = client.request('/admin/')[1]
+        check(b'name="min_installer_version"' not in page and b'name="max_ios"' not in page, 'upload form omits version inputs')
+        check('后台备注（可选）'.encode() in page and '用户将在安装器内看到'.encode() not in page, 'notes clearly admin-only and optional')
         check(b'&lt;script&gt;' in page and b'<script>alert' not in page, 'changelog XSS escaped')
         check(client.action('attach',file=('bad.tar',prepared(source1,bad=True)),release_id=r1)[0] == 422, 'prepared internal hash mismatch rejected')
         check(client.action('attach',file=('bad.tar',prepared(b'wrong')),release_id=r1)[0] == 422, 'prepared source binding mismatch rejected')
@@ -165,6 +168,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         check(payload['nonce'] == params['nonce'] and headers.get('Cache-Control') == 'no-store','nonce echoed and response not shared cached')
         verify_code = '$c=require $argv[1];$e=json_decode(stream_get_contents(STDIN),true);echo sodium_crypto_sign_verify_detached(base64_decode($e["signature_base64"]),base64_decode($e["payload_base64"]),base64_decode($c["sign_public"]))?"VALID":"INVALID";'
         def verify(e): return subprocess.check_output([PHP,'-r',verify_code,str(config)],input=json.dumps(e).encode()).decode()
+        check('changelog' not in payload['release'] and '后台私有备注' not in json.dumps(payload,ensure_ascii=False), 'admin notes excluded from public signed payload')
         check(verify(envelope) == 'VALID','Ed25519 signature verifies')
         native_code='$c=require $argv[1];$e=json_decode(stream_get_contents(STDIN),true);$k=openssl_pkey_get_private($c["native_sign_secret"]);$p=openssl_pkey_get_details($k)["key"];echo openssl_verify(base64_decode($e["payload_base64"]),base64_decode($e["native_signature_base64"]),$p,OPENSSL_ALGO_SHA256);'
         check(subprocess.check_output([PHP,'-r',native_code,str(config)],input=json.dumps(envelope).encode())==b'1','PHP native P-256 signature verifies')
@@ -208,8 +212,10 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         check(client.request(parsed.path+'?'+urllib.parse.urlencode(q,doseq=True))[0] == 403,'expired download token rejected')
         check(ticket(sha='0'*64)[0] == 404,'ticket artifact binding checked')
         source2=make_tipa(build='2',binary=False)
-        check(client.action('upload',file=('v2.tipa',source2),min_installer_version='0.8.0',max_ios='16.6.1',changelog='same display version new build')[0] == 200,'XML plist version 2 upload')
+        check(client.action('upload',file=('v2.tipa',source2),min_installer_version='99.0',max_ios='99.0')[0] == 200,'XML plist version 2 upload')
         r2=next(r for r in state()['releases'] if r!=r1)
+        check(state()['releases'][r2]['changelog']=='', 'upload succeeds with no admin note')
+        check(state()['releases'][r2]['min_installer_version']=='0.8.0' and state()['releases'][r2]['max_ios']=='16.6.1', 'posted version fields never override fixed contract')
         check(client.action('attach',file=('v2.tar',prepared(source2)),release_id=r2)[0] == 200,'second prepared artifact')
         # Create separate authenticated sessions to exercise cross-process file locking.
         clients=[]
