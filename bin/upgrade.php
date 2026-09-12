@@ -9,6 +9,7 @@ if (!isset($config['mount_path'])) $config['mount_path']='/r-'.bin2hex(random_by
 if (!isset($config['native_sign_secret'])) $config+=MTX\Security::nativeKeys();
 $store=new MTX\Store($config['storage']);
 $store->change(function (&$s) use ($config) {
+    MTX\GameIds::migrate($s);
     foreach ($s['releases'] as &$r) if ($r['artifact_format']==='prepared-payload-v1' && $r['artifact_sha256'] && !isset($r['manifest_sha256'])) {
         $r['manifest_sha256']=MTX\Packages::prepared($config['storage'].'/objects/'.$r['artifact_sha256'],$r);
     }

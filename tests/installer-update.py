@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-native-client-') as temp:
     t=Path(temp);config=t/'config.php'
     subprocess.run([PHP,'-r', 'require $argv[1]."/vendor/autoload.php";$k=MTX\\Security::nativeKeys();file_put_contents($argv[2],"<?php return ".var_export($k,true).";");echo $k["native_sign_public"];',str(ROOT),str(config)],check=True,stdout=(t/'pub').open('w'))
     header=t/'Remote.generated.h'
-    values={'MTX_REMOTE_UPDATE_URL':'https://fixture.invalid/r-fixture/api/update.php?app=mtx-dfm-cn','MTX_REMOTE_APP_KEY':'mtx-dfm-cn','MTX_REMOTE_PROFILE':'mtx-dfm-remote-v1','MTX_REMOTE_BUNDLE_ID':'com.mtx.scmtxdfm','MTX_REMOTE_KEY_ID':'fixture-1','MTX_REMOTE_PUBLIC_KEY':(t/'pub').read_text()}
+    values={'MTX_REMOTE_GAME_ID':1,'MTX_REMOTE_GAME_NAME':'满天星三角洲国服','MTX_REMOTE_UPDATE_URL':'https://fixture.invalid/r-fixture/api/update.php','MTX_REMOTE_APP_KEY':'mtx-dfm-cn','MTX_REMOTE_PROFILE':'mtx-dfm-remote-v1','MTX_REMOTE_BUNDLE_ID':'com.mtx.scmtxdfm','MTX_REMOTE_KEY_ID':'fixture-1','MTX_REMOTE_PUBLIC_KEY':(t/'pub').read_text()}
     header.write_text(''.join(f'#define {k} @{json.dumps(v)}\n' for k,v in values.items()))
     bridge=t/'Bridge.h';bridge.write_text(f'#define MTX_TESTING 1\n#import "{installer}/TrollInstallerX/Installer/MTXHostInstaller.h"\n')
     obj=t/'native.o'
@@ -49,6 +49,8 @@ import Foundation
         let suite="MTXFixture-"+UUID().uuidString, defaults=UserDefaults(suiteName:"MTXFixture-"+UUID().uuidString)!
         defaults.removePersistentDomain(forName:suite)
         if mode == "rollback" { defaults.set(2,forKey:"MTXRemoteMaxSequence") }
+        if mode == "scoped_rollback" { defaults.set(2,forKey:"MTXRemoteMaxSequence.game.1") }
+        if mode == "sibling_sequence" { defaults.set(999,forKey:"MTXRemoteMaxSequence.game.2") }
         var phases:[String]=[], byteEvents=0, ok=false, detail="", handoff=false
         do {
             let updater=MTXRemoteUpdater(endpoint:endpoint,directory:dir,defaults:defaults,progress:{ p in
@@ -112,11 +114,12 @@ import Foundation
             p=urllib.parse.urlparse(self.path);q=urllib.parse.parse_qs(p.query)
             calls.append(p.path)
             if p.path.endswith('update.php'):
+                if q.get('game_id')!=['1'] or 'app' in q: self.send(b'wrong route',422);return
                 update_calls+=1
                 tar=make_tar(source,True)[0] if mode=='traversal' else normal_tar
                 release={'release_id':('b' if mode=='switched' and update_calls>=2 else 'a')*32,'sequence':1,'bundle_id':'com.mtx.scmtxdfm','profile_id':'mtx-dfm-remote-v1','artifact_format':'prepared-payload-v1','artifact_sha256':sha(tar),'artifact_bytes':len(tar),'source_sha256':sha(source),'source_bytes':len(source),'manifest_sha256': '0'*64 if mode=='manifest_hash' else manifest_sha,'min_ios':'14.0.0','max_ios':'16.6.1','min_installer_version':'0.8.0'}
                 now=time.time();stamp=lambda n:datetime.fromtimestamp(n,timezone.utc).isoformat(timespec='seconds')
-                self.send(sign({'schema_version':1,'app_key':'wrong' if mode=='wrong_game' else 'mtx-dfm-cn','nonce':'wrong' if mode=='wrong_nonce' else q['nonce'][0],'issued_at':stamp(now-700 if mode=='expired' else now),'expires_at':stamp(now-100 if mode=='expired' else now+600),'status':'no_release' if mode=='no_release' else 'version_unknown','release':None if mode=='no_release' else release}))
+                self.send(sign({'schema_version':1,'game_id':(2 if mode=='wrong_id' else True if mode=='boolean_id' else 1),'app_key':'wrong' if mode=='wrong_game' else 'mtx-dfm-cn','nonce':'wrong' if mode=='wrong_nonce' else q['nonce'][0],'issued_at':stamp(now-700 if mode=='expired' else now),'expires_at':stamp(now-100 if mode=='expired' else now+600),'status':'no_release' if mode=='no_release' else 'version_unknown','release':None if mode=='no_release' else release}))
             elif p.path.endswith('download.php'):
                 is_source=q['sha'][0]==sha(source)
                 raw=source if is_source else (make_tar(source,True)[0] if mode=='traversal' else normal_tar)
@@ -126,20 +129,21 @@ import Foundation
             else:self.send(b'',404)
         def do_POST(self):
             data=json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            if data.get('game_id')!='1' or 'app_key' in data: self.send(b'wrong route',422);return
             calls.append('ticket:'+data['artifact_id'])
             if mode=='redirect':self.send(b'',302,{'Location':self.path});return
             url=f'http://127.0.0.1:{server.server_port}/r-test/api/download.php?sha='+data['artifact_id']
             if mode=='external_ticket':url='https://other.invalid/download.php'
-            self.send(json.dumps(data|{'url':url}).encode())
+            self.send(json.dumps(data|{'game_id':2 if mode=='wrong_ticket_id' else 1,'app_key':'mtx-dfm-cn','url':url}).encode())
     server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
     try:
-        for mode in ['success','source_corrupt','source_short','bad_signature','wrong_nonce','wrong_game','expired','no_release','redirect','external_ticket','manifest_hash','traversal','rollback','switched']:
+        for mode in ['success','sibling_sequence','scoped_rollback','source_corrupt','source_short','bad_signature','wrong_id','boolean_id','wrong_ticket_id','wrong_nonce','wrong_game','expired','no_release','redirect','external_ticket','manifest_hash','traversal','rollback','switched']:
             calls=[];update_calls=0
             result=subprocess.run([str(exe),f'http://127.0.0.1:{server.server_port}/r-test/api/update.php',str(t/mode),mode],capture_output=True,text=True,timeout=65)
             check(result.returncode==0,'native process completed: '+mode+' '+result.stderr[:200])
             report=json.loads(result.stdout.strip().splitlines()[-1])
-            check(report['ok']==(mode=='success'),'native validation result: '+mode+' '+report['detail'])
-            if mode=='success':
+            check(report['ok']==(mode in ['success','sibling_sequence']),'native validation result: '+mode+' '+report['detail'])
+            if mode in ['success','sibling_sequence']:
                 check(report['phases'].index('正在下载 TIPA')<report['phases'].index('正在下载安装资源'),'source TIPA precedes prepared resource')
                 check(report['byte_events']>=4,'byte progress delivered')
                 check((t/mode/(sha(source)+'.tipa')).read_bytes()==source,'downloaded local TIPA exact bytes')

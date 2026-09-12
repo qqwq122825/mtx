@@ -26,6 +26,8 @@ final class App
         if (PHP_SAPI !== 'cli' && !$this->config['local_http'] && (($_SERVER['HTTPS'] ?? '') !== 'on')) {
             throw new Problem(400, '请通过 HTTPS 访问。', 'https_required');
         }
+        // Backfill identities once, under the same stable lock as game creation.
+        if (!GameIds::ready($this->store->read())) $this->store->change(function (&$s) { GameIds::migrate($s); });
     }
     public function path(string $path): string { return $this->config['mount_path'] . $path; }
     public function url(string $path): string { return rtrim($this->config['base_url'], '/') . $this->path($path); }

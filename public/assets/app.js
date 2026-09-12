@@ -6,7 +6,7 @@ const toast = (message) => {
   setTimeout(() => { element.hidden = true; }, 2400);
 };
 document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(button.dataset.copy); toast('固定更新地址已复制'); }
+  try { await navigator.clipboard.writeText(button.dataset.copy); toast('共用更新接口已复制'); }
   catch { toast('请选中地址后手动复制'); }
 }));
 document.querySelectorAll('[data-dialog]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.dialog).showModal()));

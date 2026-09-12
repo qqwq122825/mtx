@@ -97,8 +97,8 @@
              self.assertEqual(settings['PRODUCT_BUNDLE_IDENTIFIER'], 'com.mtx.installer')
 -            self.assertEqual(settings['MARKETING_VERSION'], '0.7.1')
 -            self.assertEqual(str(settings['CURRENT_PROJECT_VERSION']), '15')
-+            self.assertEqual(settings['MARKETING_VERSION'], '0.8.1')
-+            self.assertEqual(str(settings['CURRENT_PROJECT_VERSION']), '17')
++            self.assertEqual(settings['MARKETING_VERSION'], '0.8.2')
++            self.assertEqual(str(settings['CURRENT_PROJECT_VERSION']), '18')
  
      def test_shared_scheme_packages_after_build_and_archive(self):
          scheme = ET.parse(ROOT / 'TrollInstallerX.xcodeproj/xcshareddata/xcschemes/TrollInstallerX.xcscheme').getroot()
@@ -153,7 +153,7 @@
  
 --- /dev/null
 +++ b/Tests/test_remote_update.py
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,44 @@
 +from pathlib import Path
 +import unittest
 +ROOT=Path(__file__).resolve().parents[1]
@@ -190,6 +190,14 @@
 +        self.assertNotIn('changelog',ui)
 +        self.assertIn('Button("确认安装到',ui)
 +        self.assertIn('本次未替换任何 App',ui)
++    def test_fixed_endpoint_and_numeric_id_binding(self):
++        download=(ROOT/'TrollInstallerX/Installer/MTXRemoteUpdater.swift').read_text()
++        verify=(ROOT/'TrollInstallerX/Installer/MTXRemoteVerification.inc').read_text()
++        self.assertIn('URLQueryItem(name: "game_id", value: String(MTXRemoteGameID()))',download)
++        self.assertNotIn('URLQueryItem(name: "app",',download)
++        self.assertIn('MTXMatchesRemoteGameID(p[@"game_id"])',verify)
++        self.assertIn('MTXMatchesRemoteGameID(ticket["game_id"])',download)
++        self.assertIn('MTXRemoteMaxSequence.game.',download)
 --- a/Tools/package_installer.sh
 +++ b/Tools/package_installer.sh
 @@ -22,10 +22,10 @@
@@ -274,7 +282,7 @@
  				CODE_SIGN_IDENTITY = "";
  				CODE_SIGN_STYLE = Manual;
 -				CURRENT_PROJECT_VERSION = 15;
-+				CURRENT_PROJECT_VERSION = 17;
++				CURRENT_PROJECT_VERSION = 18;
  				DEVELOPMENT_ASSET_PATHS = "\"TrollInstallerX/Preview Content\"";
  				DEVELOPMENT_TEAM = "";
  				ENABLE_PREVIEWS = YES;
@@ -283,7 +291,7 @@
  					"$(PROJECT_DIR)/TrollInstallerX/External/lib",
  				);
 -				MARKETING_VERSION = 0.7.1;
-+				MARKETING_VERSION = 0.8.1;
++				MARKETING_VERSION = 0.8.2;
  				PRODUCT_BUNDLE_IDENTIFIER = com.mtx.installer;
  				PRODUCT_NAME = MTXInstaller;
  				EXECUTABLE_NAME = MTXInstaller;
@@ -292,7 +300,7 @@
  				CODE_SIGN_IDENTITY = "";
  				CODE_SIGN_STYLE = Manual;
 -				CURRENT_PROJECT_VERSION = 15;
-+				CURRENT_PROJECT_VERSION = 17;
++				CURRENT_PROJECT_VERSION = 18;
  				DEVELOPMENT_ASSET_PATHS = "\"TrollInstallerX/Preview Content\"";
  				DEVELOPMENT_TEAM = "";
  				ENABLE_PREVIEWS = YES;
@@ -301,7 +309,7 @@
  					"$(PROJECT_DIR)/TrollInstallerX/External/lib",
  				);
 -				MARKETING_VERSION = 0.7.1;
-+				MARKETING_VERSION = 0.8.1;
++				MARKETING_VERSION = 0.8.2;
  				PRODUCT_BUNDLE_IDENTIFIER = com.mtx.installer;
  				PRODUCT_NAME = MTXInstaller;
  				EXECUTABLE_NAME = MTXInstaller;
@@ -448,18 +456,21 @@
  static double MonotonicSeconds(void) {
 --- a/TrollInstallerX/Installer/MTXHostInstaller.h
 +++ b/TrollInstallerX/Installer/MTXHostInstaller.h
-@@ -2,6 +2,10 @@
+@@ -2,6 +2,13 @@
  
  NS_ASSUME_NONNULL_BEGIN
  NSString *MTXArchiveSHA256(void);
 +NSString *MTXRemoteUpdateURL(void);
++NSInteger MTXRemoteGameID(void);
++NSString *MTXRemoteGameName(void);
++BOOL MTXMatchesRemoteGameID(id _Nullable identifier);
 +NSString *MTXRemoteAppKey(void);
 +NSString *MTXRemoteProfile(void);
 +NSDictionary * _Nullable MTXVerifyRemoteEnvelope(NSData *envelope, NSString * _Nullable nonce, NSError * _Nullable * _Nullable error);
  NSString * _Nullable MTXFileSHA256(NSString *path);
  // Immutable, eagerly read bytes. Do not reopen the app's data container after
  // the process credentials change. No file-backed mmap or delayed path reads.
-@@ -10,6 +14,8 @@
+@@ -10,6 +17,8 @@
  + (instancetype)new NS_UNAVAILABLE;
  @end
  MTXPreparedPayload * _Nullable MTXLoadPreparedPayload(NSString *preparedPath, NSError * _Nullable * _Nullable error);
@@ -470,8 +481,22 @@
  // Immutable selection snapshot made after the access setup and read-only scan. It
 --- a/TrollInstallerX/Installer/MTXHostInstaller.m
 +++ b/TrollInstallerX/Installer/MTXHostInstaller.m
-@@ -15,14 +15,16 @@
- static NSString *const PayloadID = @"com.mtx.scmtxdfm";
+@@ -1,5 +1,9 @@
+ #import "MTXHostInstaller.h"
+ #import "MTXPayload.generated.h"
++#ifndef MTX_REMOTE_CONFIG_HEADER
++#define MTX_REMOTE_CONFIG_HEADER "MTXRemote.generated.h"
++#endif
++#import MTX_REMOTE_CONFIG_HEADER
+ #import <CommonCrypto/CommonDigest.h>
+ #import <sys/stat.h>
+ #import <sys/mount.h>
+@@ -12,17 +16,19 @@
+ 
+ static NSString *const BackupName = @".MTXBackup";
+ static NSString *const HostID = @"com.apple.tips";
+-static NSString *const PayloadID = @"com.mtx.scmtxdfm";
++static NSString *const PayloadID = MTX_REMOTE_BUNDLE_ID;
  
  @interface MTXPreparedPayload ()
 +@property (nonatomic, copy, readonly) NSData *manifestBytes;
@@ -490,7 +515,7 @@
      return self;
  }
  @end
-@@ -39,6 +41,8 @@
+@@ -39,6 +45,8 @@
                                         userInfo:@{NSLocalizedDescriptionKey: message}];
      return NO;
  }
@@ -499,7 +524,7 @@
  
  static BOOL FileFailure(NSError **error, NSString *operation, NSString *path, int code) {
      return Fail(error, [NSString stringWithFormat:@"F202 %@：%@；errno=%d (%s)；uid=%u/euid=%u gid=%u/egid=%u",
-@@ -239,7 +243,7 @@
+@@ -239,7 +247,7 @@
  
  // The convenience plist reader discards the reason for failure. Read the
  // manifest explicitly so a device log distinguishes I/O, parsing and identity.
@@ -508,7 +533,7 @@
      NSString *path = [prepared stringByAppendingPathComponent:@"Manifest.plist"];
      int fd = open(path.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
      if (fd < 0) {
-@@ -285,6 +289,7 @@
+@@ -285,6 +293,7 @@
          Fail(error, @"P105 内置清单根节点不是字典");
          return nil;
      }
@@ -516,7 +541,7 @@
      return manifest;
  }
  
-@@ -293,7 +298,7 @@
+@@ -293,7 +302,7 @@
      return text.length > 80 ? [[text substringToIndex:80] stringByAppendingString:@"…"] : text;
  }
  
@@ -525,7 +550,7 @@
      if (![manifest isKindOfClass:NSDictionary.class]) {
          Fail(error, @"P105 内置清单根节点不是字典"); return nil;
      }
-@@ -306,9 +311,9 @@
+@@ -306,9 +315,9 @@
                       PayloadID, BriefValue(manifest[@"BundleIdentifier"])]);
          return nil;
      }
@@ -537,7 +562,7 @@
          return nil;
      }
      NSDictionary *files = manifest[@"Files"], *overrides = manifest[@"InfoOverrides"];
-@@ -372,7 +377,15 @@
+@@ -372,7 +381,15 @@
  }
  
  static BOOL ValidateSnapshot(MTXPreparedPayload *payload, NSError **error) {
@@ -554,7 +579,7 @@
      for (NSString *name in @[@"Main", @"MTXMenuIcons.ttf"]) {
          NSData *data = payload.fileData[name];
          if (![data isKindOfClass:NSData.class] || data.length == 0 || data.length > 128 * 1024 * 1024)
-@@ -385,20 +398,41 @@
+@@ -385,20 +402,41 @@
      return YES;
  }
  
@@ -602,7 +627,7 @@
  NSString *MTXValidatePreparedPayload(NSString *preparedPath) {
 --- /dev/null
 +++ b/TrollInstallerX/Installer/MTXRemoteUpdater.swift
-@@ -0,0 +1,268 @@
+@@ -0,0 +1,278 @@
 +import Foundation
 +import CryptoKit
 +import Security
@@ -694,6 +719,16 @@
 +    private let directory: URL
 +    private let defaults: UserDefaults
 +    private let fm = FileManager.default
++    private var sequenceKey: String { "MTXRemoteMaxSequence.game.\(MTXRemoteGameID())" }
++    private var highestSequence: Int {
++        var highest = defaults.integer(forKey: sequenceKey)
++        // v0.8.0/v0.8.1 supported only the original DFM build. Carry its
++        // observed sequence forward without blocking another game's fresh ID.
++        if MTXRemoteGameID() == 1 && MTXRemoteAppKey() == "mtx-dfm-cn" {
++            highest = max(highest, defaults.integer(forKey: "MTXRemoteMaxSequence"))
++        }
++        return highest
++    }
 +    private let installerVersion: String
 +    private let osVersion: String
 +    private let progress: (MTXDownloadProgress) -> Void
@@ -733,7 +768,7 @@
 +        guard SecRandomCopyBytes(kSecRandomDefault, nonceBytes.count, &nonceBytes) == errSecSuccess else { throw downloadFailure("请求初始化失败，请重试。") }
 +        let nonce = Data(nonceBytes).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
 +        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
-+        components.queryItems = [URLQueryItem(name: "app", value: MTXRemoteAppKey()), URLQueryItem(name: "nonce", value: nonce),
++        components.queryItems = [URLQueryItem(name: "game_id", value: String(MTXRemoteGameID())), URLQueryItem(name: "nonce", value: nonce),
 +            URLQueryItem(name: "installer_version", value: installerVersion), URLQueryItem(name: "os_version", value: osVersion),
 +            URLQueryItem(name: "profile", value: MTXRemoteProfile())]
 +        let data = try json(components.url!)
@@ -744,7 +779,7 @@
 +        guard let r = payload["release"] as? [String: Any] else {
 +            let message: String
 +            switch payload["status"] as? String {
-+            case "client_upgrade_required": message = "请先下载最新的三角洲国服安装器。"
++            case "client_upgrade_required": message = "请先安装对应游戏的最新安装器。"
 +            case "incompatible": message = "当前系统不在此版本的支持范围内。"
 +            default: message = "暂时没有已发布的更新包，请稍后重试。"
 +            }
@@ -754,7 +789,7 @@
 +        guard client.compare(r["min_installer_version"] as! String, options: .numeric) != .orderedAscending,
 +              os.compare(r["min_ios"] as! String, options: .numeric) != .orderedAscending,
 +              os.compare(r["max_ios"] as! String, options: .numeric) != .orderedDescending else { throw downloadFailure("此更新与当前系统或安装器版本不匹配。") }
-+        guard (r["sequence"] as! NSNumber).intValue >= defaults.integer(forKey: "MTXRemoteMaxSequence") else { throw downloadFailure("更新序号低于已确认版本，请稍后重试。") }
++        guard (r["sequence"] as! NSNumber).intValue >= highestSequence else { throw downloadFailure("更新序号低于已确认版本，请稍后重试。") }
 +        return (data, r)
 +    }
 +    private func normalizedVersion(_ value: String) -> String {
@@ -778,9 +813,9 @@
 +        }
 +        try? fm.removeItem(at: file)
 +        let ticketURL = endpoint.deletingLastPathComponent().appendingPathComponent("download-ticket.php")
-+        let raw = try json(ticketURL, body: ["app_key": MTXRemoteAppKey(), "release_id": r["release_id"] as! String, "artifact_id": sha])
++        let raw = try json(ticketURL, body: ["game_id": String(MTXRemoteGameID()), "release_id": r["release_id"] as! String, "artifact_id": sha])
 +        guard let ticket = try JSONSerialization.jsonObject(with: raw) as? [String: Any],
-+              ticket["app_key"] as? String == MTXRemoteAppKey(), ticket["release_id"] as? String == r["release_id"] as? String,
++              MTXMatchesRemoteGameID(ticket["game_id"]), ticket["app_key"] as? String == MTXRemoteAppKey(), ticket["release_id"] as? String == r["release_id"] as? String,
 +              ticket["artifact_id"] as? String == sha, let text = ticket["url"] as? String,
 +              let url = URL(string: text), permitted(url), url.lastPathComponent == "download.php" else { throw downloadFailure("下载地址校验失败，请重试。") }
 +        let temporary = directory.appendingPathComponent(UUID().uuidString + ".part")
@@ -797,7 +832,7 @@
 +    }
 +    func prepare() throws -> MTXPreparedPayload {
 +        precondition(!Thread.isMainThread)
-+        progress(MTXDownloadProgress(title: "正在检查三角洲国服更新", received: 0, total: 0))
++        progress(MTXDownloadProgress(title: "正在检查\(MTXRemoteGameName())更新", received: 0, total: 0))
 +        try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
 +        // Remove incomplete downloads from interrupted launches, not immutable cache files.
 +        for file in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) where file.pathExtension == "part" || file.lastPathComponent.hasPrefix("stage-") { try? fm.removeItem(at: file) }
@@ -817,7 +852,7 @@
 +        try MTXStrictTar.unpack(tar, to: stage)
 +        var error: NSError?
 +        guard let payload = MTXLoadRemotePreparedPayload(stage.path, envelope, &error) else { throw downloadFailure("安装资源校验失败，请联系发布者重新上传对应包。") }
-+        defaults.set((current["sequence"] as! NSNumber).intValue, forKey: "MTXRemoteMaxSequence")
++        defaults.set((current["sequence"] as! NSNumber).intValue, forKey: sequenceKey)
 +        // Keep only the selected version's downloaded TIPA and TAR on disk.
 +        let keep = Set([tipa.lastPathComponent, tar.lastPathComponent, stage.lastPathComponent])
 +        for file in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) where !keep.contains(file.lastPathComponent) { try? fm.removeItem(at: file) }
@@ -873,7 +908,7 @@
 +}
 --- /dev/null
 +++ b/TrollInstallerX/Installer/MTXRemoteVerification.inc
-@@ -0,0 +1,61 @@
+@@ -0,0 +1,67 @@
 +// Native verification is shared by the UI process and the one-shot helper.
 +// PHP: ECDSA P-256 / SHA-256, DER X9.62 signature over original payload bytes.
 +#import <Security/Security.h>
@@ -882,6 +917,12 @@
 +#endif
 +#import MTX_REMOTE_CONFIG_HEADER
 +NSString *MTXRemoteUpdateURL(void) { return MTX_REMOTE_UPDATE_URL; }
++NSInteger MTXRemoteGameID(void) { return [MTX_REMOTE_GAME_ID integerValue]; }
++NSString *MTXRemoteGameName(void) { return MTX_REMOTE_GAME_NAME; }
++BOOL MTXMatchesRemoteGameID(id value) {
++    return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID() &&
++        [value doubleValue] == [value longLongValue] && [value isEqual:MTX_REMOTE_GAME_ID];
++}
 +NSString *MTXRemoteAppKey(void) { return MTX_REMOTE_APP_KEY; }
 +NSString *MTXRemoteProfile(void) { return MTX_REMOTE_PROFILE; }
 +static BOOL RemoteHex(id value, NSUInteger length) {
@@ -915,7 +956,7 @@
 +    if (!valid) REMOTE_FAIL("更新信息校验失败，请稍后重试。");
 +    id p = [NSJSONSerialization JSONObjectWithData:raw options:0 error:NULL];
 +    if (![p isKindOfClass:NSDictionary.class] || ![p[@"schema_version"] isEqual:@1] ||
-+        ![p[@"app_key"] isEqual:MTX_REMOTE_APP_KEY] || (nonce && ![p[@"nonce"] isEqual:nonce])) REMOTE_FAIL("更新身份或请求校验失败。");
++        !MTXMatchesRemoteGameID(p[@"game_id"]) || ![p[@"app_key"] isEqual:MTX_REMOTE_APP_KEY] || (nonce && ![p[@"nonce"] isEqual:nonce])) REMOTE_FAIL("更新身份或请求校验失败。");
 +    if (![p[@"issued_at"] isKindOfClass:NSString.class] || ![p[@"expires_at"] isKindOfClass:NSString.class]) REMOTE_FAIL("更新有效期缺失。");
 +    NSISO8601DateFormatter *formatter = [NSISO8601DateFormatter new];
 +    NSDate *issued = [formatter dateFromString:p[@"issued_at"]], *expires = [formatter dateFromString:p[@"expires_at"]];
@@ -1051,7 +1092,7 @@
          guard !running && !hasRun && supportsMTXTarget(device) else { return }
 +        running = true
 +        downloadError = nil
-+        downloadProgress = MTXDownloadProgress(title: "正在检查三角洲国服更新", received: 0, total: 0)
++        downloadProgress = MTXDownloadProgress(title: "正在检查\(MTXRemoteGameName())更新", received: 0, total: 0)
 +        UIApplication.shared.isIdleTimerDisabled = true
 +        let target = device
 +        Task {

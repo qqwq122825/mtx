@@ -8,16 +8,16 @@ macOS；PHP 8.5.1；Python 3.11.14；Node 24.9.0（仅测试）；Xcode 16.1。�
 
 ## 自动验证
 
-- `tests/integration.py`：**122 项 HTTP/集成检查**。密码、CSRF、Cookie、限流、配置轮换、ZIP/Plist/TAR、发布并发/下架、Ed25519/P-256、摘要、Range、票据等。
+- `tests/integration.py`：**143 项 HTTP/集成检查**。密码、CSRF、Cookie、限流、配置轮换、ZIP/Plist/TAR、发布并发/下架、Ed25519/P-256、摘要、Range、票据等。
 - 新增随机路径隔离、页面资源/表单正确前缀、Cookie 子目录、真实 TIPA 源下载及新旧票据失效用例。
 - `tests/upload-ui.test.cjs`：**7 项**，随机前缀上传动作、进度、服务器异常、外站重定向拦截。
-- `tests/installer-update.py --installer /工程路径/TrollInstallerX`：**48 项原生客户端检查**。现场生成临时 P-256 密钥，PHP 签名，编译实际 Swift 下载器与 Objective-C 校验器，连接本机 HTTP fixture（HTTP 仅在测试编译标志下开放）。
+- `tests/installer-update.py --installer /工程路径/TrollInstallerX`：**67 项原生客户端检查**。现场生成临时 P-256 密钥，PHP 签名，编译实际 Swift 下载器与 Objective-C 校验器，连接本机 HTTP fixture（HTTP 仅在测试编译标志下开放）。
 - 原生覆盖：TIPA 先于 TAR、字节进度、本地原包字节一致、缓存复用、错误签名/nonce/游戏/过期信息、无发布、短包/坏摘要、重定向/外站票据、坏清单摘要、TAR 路径穿越、旧序号、下载期间发布变化。失败的 TIPA 不触发后续 TAR 下载，临时分片清理。
 - 不可变资源交给助手后，再次校验正常签名；修改文件/Manifest/凭证，或删除凭证，均拦截。
-- 原工程 `Tests/run_tests.sh`：**46 个 Python 测试**；主机事务、间接事务、宿主选择的断言检查，以及日志保存/导出、纯下载错误隐藏日志、选择取消/超时/100 轮并发点击测试通过。
+- 原工程 `Tests/run_tests.sh`：**47 个 Python 测试**；主机事务、间接事务、宿主选择的断言检查，以及日志保存/导出、纯下载错误隐藏日志、选择取消/超时/100 轮并发点击测试通过。
 - PHP/JS 语法、Composer 锁定依赖审计通过。
 - `installer-integration/remote-update.patch` 在临时基线应用后，所有文件摘要匹配；重复执行幂等。
-- iOS Release 构建成功；新产物 `MTXInstaller-remote-unsigned.tipa` 为 **0.8.1 / build 17**。供用户通过巨魔安装，真实设备行为仍待测试；内层依旧走现有准备机制。
+- iOS Release 构建成功；新产物 `MTXInstaller-remote-unsigned.tipa` 为 **0.8.2 / build 18**。供用户通过巨魔安装，真实设备行为仍待测试；内层依旧走现有准备机制。
 
 ## 浏览器验证
 
@@ -49,3 +49,12 @@ macOS；PHP 8.5.1；Python 3.11.14；Node 24.9.0（仅测试）；Xcode 16.1。�
 - 浏览器检查上传区域：仅文件、可选后台备注、上传按钮；备注无 required 属性。
 - 安装按钮直接调用下载入口，删除前置安装弹窗；保留最终系统 App 选择/替换确认。源码回归与 iOS Release 构建通过。
 - 修改前的远程安装器及相关源码已备份到原工程 Build/SimpleFlowBaseline-*，不触及源 TIPA。
+
+## 游戏 ID 复测
+
+- 旧 JSON 自动迁移、已有 ID 保持稳定、重复升级不重编号；新增游戏忽略外部指定 ID，使用单调计数器，失败创建不消费 ID。两个进程并发创建得到不同 ID。
+- 新版 game_id 与旧 app/app_key 路由兼容；无效/未知 ID、冲突标识和跨游戏票据均拦截。
+- 导出工具按 ID 自动填写游戏身份和共用无查询参数 URL；新版安装器及助手核对签名中的整型 ID，拒绝其他游戏与布尔值冒充 ID。
+- 发布序号按游戏 ID 分开保存；三角洲保留旧序号迁移，其他游戏的历史序号不干扰当前游戏。
+- 本机浏览器确认共用接口、当前三角洲 ID 1、自动编号的新增表单；没有创建测试业务游戏或发布现有真实包。
+- 原工程 Build/GameIDBaseline-* 保留修改前源码、绑定与 0.8.1 / build 17 安装器。新版为 0.8.2 / build 18。

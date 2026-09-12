@@ -12,7 +12,7 @@ try {
     $service=new Releases($app);
     switch ($action) {
         case 'logout': $_SESSION=[]; session_destroy(); Http::redirect($app->path('/admin/login.php'));
-        case 'create': $key=$service->createGame($_POST); $message='游戏配置已创建，固定地址已生成。'; break;
+        case 'create': $key=$service->createGame($_POST); $message='游戏已创建并自动分配 ID，可在当前构建绑定中查看。'; break;
         case 'upload': $id=$service->upload($key,$app->upload('file','tipa'),$_POST); $message='TIPA 检查完成。请查看版本记录，准备完成后再发布。'; break;
         case 'attach': $service->attach($key,Http::text($_POST,'release_id',32),$app->upload('file','tar')); $message='准备产物的结构、身份和摘要校验通过，可确认发布。'; break;
         case 'publish':
@@ -24,7 +24,8 @@ try {
         default: throw new Problem(422,'操作类型异常。');
     }
     $_SESSION['flash']=$message;
-    $url=$app->path('/admin/?app=').rawurlencode($key);
+    $game=Releases::game($app->store->read(),$key);
+    $url=$app->path('/admin/?game_id=').$game['game_id'];
     if ($ajax) Http::json(['redirect'=>$url,'message'=>$message]);
     Http::redirect($url);
 } catch (Problem $e) {

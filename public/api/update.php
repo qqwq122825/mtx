@@ -1,17 +1,16 @@
 <?php
 declare(strict_types=1);
 if (!defined('MTX_FRONT_CONTROLLER')) { http_response_code(404); exit; }
-use MTX\{Http,Packages,Releases,Security,Problem};
+use MTX\{Http,Packages,Releases,Security,Problem,GameIds};
 $app=require dirname(__DIR__,2).'/src/bootstrap.php';
 Http::method('GET');
-$key=Http::text($_GET,'app',60);
 $nonce=Http::text($_GET,'nonce',43);
 if (!preg_match('/\A[A-Za-z0-9_-]{43}\z/',$nonce) || strlen(base64_decode(strtr($nonce,'-_','+/').'=',true)?:'')!==32) throw new Problem(422,'nonce 应为 32 字节随机数的 Base64URL 编码。');
 $client=Packages::version(Http::text($_GET,'installer_version',12));
 $os=Packages::version(Http::text($_GET,'os_version',12));
 $profile=Http::text($_GET,'profile',80);
 $installed=isset($_GET['installed_sequence'])?Http::integer($_GET,'installed_sequence'):null;
-$s=$app->store->read(); $g=Releases::game($s,$key);
+$s=$app->store->read(); $g=GameIds::resolve($s,$_GET,'app'); $key=$g['app_key'];
 $status='no_release'; $message='此游戏暂无已发布版本。'; $wire=null;
 if ($g['enabled'] && $g['current_release_id']) {
     $r=Releases::release($s,$g['current_release_id'],$key);
@@ -26,4 +25,4 @@ if ($g['enabled'] && $g['current_release_id']) {
         }
     }
 }
-Http::json(Security::sign($app,['schema_version'=>1,'app_key'=>$key,'nonce'=>$nonce,'issued_at'=>gmdate('c'),'expires_at'=>gmdate('c',time()+600),'status'=>$status,'message'=>$message,'release'=>$wire]));
+Http::json(Security::sign($app,['schema_version'=>1,'game_id'=>$g['game_id'],'app_key'=>$key,'nonce'=>$nonce,'issued_at'=>gmdate('c'),'expires_at'=>gmdate('c',time()+600),'status'=>$status,'message'=>$message,'release'=>$wire]));

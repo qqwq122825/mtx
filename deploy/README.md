@@ -56,4 +56,10 @@ unset MTX_PASSWORD
 
 ## 6. 配套远程版安装器
 
-详见 [CDN、目录路由与客户端](../docs/cdn-and-installer.md)。旧服务升级前停站备份，运行 `php bin/upgrade.php` 为历史记录补齐 Manifest 摘要和原生签名公钥配置。代码更新保留私有配置与所有包；配套生产私有包只用于新站首次部署，不覆盖已运行站点的 storage。
+详见 [CDN、目录路由与客户端](../docs/cdn-and-installer.md)。旧服务升级前停站备份，运行 `php bin/upgrade.php` 为旧游戏分配稳定数字 ID，并为历史记录补齐 Manifest 摘要和原生签名公钥配置。代码更新保留私有配置与所有包；配套生产私有包只用于新站首次部署，不覆盖已运行站点的 storage。
+
+## 7. 游戏 ID 与首次部署包
+
+所有游戏共用 `/<随机入口>/api/update.php`，通过 game_id 区分。后台创建游戏时自动分配递增 ID，现有三角洲为 1；固定 ID 随 state.json 和 next_game_id 一起备份。不要手动重编号或重建已有站点状态。
+
+`php bin/package-private.php --url https://mtx.jk92.cc` 导出配套 PRIVATE 包，包含当前游戏目录、ID 计数器、对应密码摘要及密钥，但没有版本、包文件或发布指针。仅用于新站首次部署，旧站保留自己的配置与 storage。安装器用 `bin/export-installer.php --game-id ID --url https://mtx.jk92.cc --out /完整路径/MTXRemote.generated.h` 导出公开配置后重新构建。

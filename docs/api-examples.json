@@ -4,7 +4,7 @@
   "installer_binding": {
     "app_key": "mtx-dfm-cn",
     "display_name": "满天星三角洲国服",
-    "update_url": "https://updates.example.com/RANDOM_ENTRY/api/update.php?app=mtx-dfm-cn",
+    "update_url": "https://updates.example.com/RANDOM_ENTRY/api/update.php",
     "expected_bundle_id": "com.mtx.scmtxdfm",
     "profile_id": "mtx-dfm-remote-v1",
     "trusted_public_keys": {
@@ -12,14 +12,15 @@
     },
     "allowed_download_hosts": [
       "updates.example.com"
-    ]
+    ],
+    "game_id": 1
   },
   "request_parameters": {
-    "app": "mtx-dfm-cn",
     "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    "installer_version": "0.8.1",
+    "installer_version": "0.8.2",
     "os_version": "16.1.2",
-    "profile": "mtx-dfm-remote-v1"
+    "profile": "mtx-dfm-remote-v1",
+    "game_id": 1
   },
   "decoded_signed_payload_example": {
     "schema_version": 1,
@@ -47,15 +48,17 @@
       "published_at": "2026-09-12T08:00:00Z",
       "source_bytes": 10000,
       "manifest_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
-    }
+    },
+    "game_id": 1
   },
   "future_game_binding": {
-    "app_key": "mtx-arena-cn",
+    "app_key": "game-2",
     "display_name": "满天星暗区突围国服",
-    "update_url": "https://updates.example.com/RANDOM_ENTRY/api/update.php?app=mtx-arena-cn",
+    "update_url": "https://updates.example.com/RANDOM_ENTRY/api/update.php",
     "expected_bundle_id": null,
-    "profile_id": null,
+    "profile_id": "game-2-remote-v1",
     "enabled": false,
-    "requires_new_installer_build": true
+    "requires_new_installer_build": true,
+    "game_id": 2
   }
 }

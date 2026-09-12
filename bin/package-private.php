@@ -17,7 +17,12 @@ $zip->addFromString('config.local.php',"<?php\n// PRIVATE. Do not expose through
 $zip->setExternalAttributesName('config.local.php',ZipArchive::OPSYS_UNIX,0100600<<16);
 $zip->addEmptyDir('storage');$zip->addEmptyDir('storage/objects');$zip->addEmptyDir('storage/sessions');
 foreach(['storage/','storage/objects/','storage/sessions/'] as $dir)$zip->setExternalAttributesName($dir,ZipArchive::OPSYS_UNIX,0040700<<16);
-$state=['schema'=>1,'apps'=>['mtx-dfm-cn'=>['app_key'=>'mtx-dfm-cn','name'=>'满天星三角洲国服','bundle_id'=>'com.mtx.scmtxdfm','format'=>'prepared-payload-v1','profile_id'=>'mtx-dfm-remote-v1','enabled'=>true,'current_release_id'=>null,'next_sequence'=>1,'revision'=>0]],'releases'=>[],'audit'=>[]];
+// Carry the game catalog and monotonic ID counter, but no releases/files/audit.
+$catalog=(new MTX\Store((require getenv('MTX_CONFIG')?:$root.'/config.local.php')['storage']))->read();
+MTX\GameIds::migrate($catalog);
+$state=['schema'=>1,'next_game_id'=>$catalog['next_game_id'],'apps'=>$catalog['apps'],'releases'=>[],'audit'=>[]];
+foreach ($state['apps'] as &$game) { $game['current_release_id']=null; $game['next_sequence']=1; $game['revision']=0; }
+unset($game);
 $zip->addFromString('storage/state.json',json_encode($state,JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR));
 $zip->setExternalAttributesName('storage/state.json',ZipArchive::OPSYS_UNIX,0100600<<16);
 $nginx=str_replace('RANDOM_ENTRY',ltrim($c['mount_path'],'/'),file_get_contents($root.'/deploy/nginx.conf.example'));
