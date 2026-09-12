@@ -1,5 +1,7 @@
 # 满天星客服 Telegram 头像
 
+> 星空版为旧预览，未设置到机器人。后续使用 `mtx-telegram-avatar-minimal-20260912.jpg` 简约版本，见同目录简约版说明。
+
 - 目标：`@iosmtx_bot`（满天星客服）的头像，不修改账号、自动回复或 Webhook。
 - `mtx-telegram-avatar-20260912.png`：内置 ImageGen 生成的原图，1254 × 1254。
 - `mtx-telegram-avatar-20260912.jpg`：用于 Telegram 官方 `setMyProfilePhoto` 的 JPEG 格式副本；仅格式转换，未改动构图。
