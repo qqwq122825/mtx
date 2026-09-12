@@ -17,11 +17,11 @@ try {
     $wireApi->call('fixture','getMe');$wireApi->call('fixture','setWebhook',['allowed_updates'=>['message']]);
     check($wire[0]==='{}','empty Telegram parameters encoded as an object, not an array');
     check($wire[1]==='{"allowed_updates":["message"]}','Telegram list parameters preserve JSON arrays');
-    $calls=[];$next=100;$failure=null;
-    $api=new TelegramApi(function($method,$params) use (&$calls,&$next,&$failure) {
+    $calls=[];$next=100;$failure=null;$profiles=[];
+    $api=new TelegramApi(function($method,$params) use (&$calls,&$next,&$failure,&$profiles) {
         $calls[]=[$method,$params];
         if ($failure && $failure[0]===$method && (!isset($failure[2]) || ($params['chat_id']??null)===$failure[2])) { $e=$failure[1];$failure=null;throw $e; }
-        return match($method) {'getMe'=>['is_bot'=>true,'username'=>'MTXFixtureBot'],'setWebhook','deleteWebhook','answerCallbackQuery'=>true,'getWebhookInfo'=>['url'=>'https://updates.example.com/r-telegram-fixture-0123456789/api/telegram-webhook.php','pending_update_count'=>2,'allowed_updates'=>['message','callback_query']],default=>['message_id'=>++$next,'text'=>'RESPONSE_CONTENT_NOT_FOR_STORAGE']};
+        return match($method) {'getChat'=>$profiles[$params['chat_id']]??['id'=>$params['chat_id'],'type'=>'private','first_name'=>'FIXTURE_LOOKUP_NAME','username'=>'FixtureRecipient_'.$params['chat_id']], 'getMe'=>['is_bot'=>true,'username'=>'MTXFixtureBot'],'setWebhook','deleteWebhook','answerCallbackQuery'=>true,'getWebhookInfo'=>['url'=>'https://updates.example.com/r-telegram-fixture-0123456789/api/telegram-webhook.php','pending_update_count'=>2,'allowed_updates'=>['message','callback_query']],default=>['message_id'=>++$next,'text'=>'RESPONSE_CONTENT_NOT_FOR_STORAGE']};
     });
     $bot=new TelegramBot(new App(),$api);$admin=77777;$a=88888;$b=99999;
     $token='123456:'.str_repeat('x',40);
@@ -78,12 +78,13 @@ try {
     $bot->saveReplies($defaults);
     $u=$message($a,['from'=>['username'=>'FIXTURE_PERSONAL_USERNAME'],'chat'=>['username'=>'WrongChatName'],'forward_origin'=>['type'=>'user','sender_user'=>['username'=>'WrongForwardedAuthor']]]);$out=$deliver($u);$routes=$bot->store->read()['routes'];$aCopy=array_key_last($routes);$aHeading=$aCopy-1;
     check(array_column($out,0)===['sendMessage','copyMessage','sendMessage'] && $out[2][1]['chat_id']===$a,'incoming user message gets header, copy and user acknowledgement');
-    check($out[0][1]['chat_id']===$admin && $out[0][1]['text']==='客服消息 · #'.$a."\n昵称：FIXTURE_PERSONAL_NAME\n用户名：@FIXTURE_PERSONAL_USERNAME\n请回复这张卡片或下方消息。" && !isset($out[0][1]['parse_mode']),'operator card shows actual sender handle, name and ID as plain text, not forwarded/chat username');
+    check($out[0][1]['chat_id']===$admin && $out[0][1]['text']==='📩 @FIXTURE_PERSONAL_USERNAME 发来新消息'."\n昵称：FIXTURE_PERSONAL_NAME · ID：".$a."\n↩️ 回复这张卡片或下方消息即可回信。" && !isset($out[0][1]['parse_mode']),'operator card shows actual sender handle, name and ID as plain text, not forwarded/chat username');
     check($out[1][1]['chat_id']===$admin && $out[1][1]['from_chat_id']===$a && $out[1][1]['message_id']===$u['message']['message_id'],'correct incoming source and destination');
+    check($out[0][1]['disable_notification']===false && $out[1][1]['disable_notification']===true,'new inquiry alerts through the identity card, body copy is silent');
     check($routes[$aCopy]['chat_id']===$a && $routes[$aHeading]['chat_id']===$a && $out[1][1]['reply_parameters']['message_id']===$aHeading,'header and message both mapped to user');
     check($deliver($u)===[],'duplicate webhook does not resend');
     $out=$deliver($message(131313));check(count($out)===3,'first issue gets one receipt');
-    check(str_contains($out[0][1]['text'],"\n用户名：未设置用户名\n"),'sender without a username is identified explicitly');
+    check(str_contains($out[0][1]['text'],"\n未设置用户名 · ID："),'sender without a username is identified explicitly');
     $out=$deliver($message(131313));check(count($out)===2,'follow-up within cooldown still forwards without receipt');
     $bot->store->locked(function(&$s)use($bot){$s['reply_receipts'][131313]['at']=time()-TelegramReplies::COOLDOWN-1;$bot->store->save($s);});
     $out=$deliver($message(131313));check(count($out)===3,'receipt becomes eligible after cooldown');
@@ -93,7 +94,8 @@ try {
     check($out[0][0]==='copyMessage' && $out[0][1]['chat_id']===$a,'operator reply matching menu text still reaches user');
     $reply=$message($admin,['reply_to_message'=>['message_id'=>$aCopy],'text'=>'ADMIN_PRIVATE_REPLY']);$out=$deliver($reply);
     check($out[0][0]==='copyMessage' && $out[0][1]['chat_id']===$a && $out[0][1]['from_chat_id']===$admin && $out[0][1]['message_id']===$reply['message']['message_id'],'operator replies via bot copy to mapped user');
-    check($out[1][1]['chat_id']===$admin && str_contains($out[1][1]['text'],'已回复'),'operator delivery receipt');
+    check(array_column($out,0)===['copyMessage','getChat','sendMessage'] && $out[1][1]['chat_id']===$a && $out[2][1]['chat_id']===$admin && $out[2][1]['text']==='✅ 已回复 @FixtureRecipient_'.$a.'（#'.$a.'）','operator receipt names the current recipient after confirmed delivery');
+    check(!($out[0][1]['disable_notification']??false) && $out[2][1]['disable_notification']===true,'user still receives a normal reply while operator success notice is silent');
     $deliver($message($b));$bCopy=array_key_last($bot->store->read()['routes']);
     $out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$bCopy]]));check($out[0][1]['chat_id']===$b,'separate users keep separate reply routes');
     $out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$aHeading]]));check($out[0][1]['chat_id']===$a,'reply to original header also routes correctly');
@@ -144,19 +146,40 @@ try {
     $identityPeer=282800;
     foreach (['',null,[],true,123,'@WrongName',"Injected\n@Other",'Wrong<Name>',str_repeat('x',65),"Bidi\u{202e}Name"] as $bad) {
         $out=$deliver($message(++$identityPeer,['from'=>['username'=>$bad]]));
-        check(str_contains($out[0][1]['text'],"\n用户名：未设置用户名\n") && $out[1][0]==='copyMessage','invalid handle is omitted without blocking relay: '.json_encode($bad));
+        check(str_contains($out[0][1]['text'],"\n未设置用户名 · ID：") && $out[1][0]==='copyMessage','invalid handle is omitted without blocking relay: '.json_encode($bad));
     }
     foreach (['Ab_c',str_repeat('X',64)] as $valid) {
         $out=$deliver($message(++$identityPeer,['from'=>['username'=>$valid]]));
-        check(str_contains($out[0][1]['text'],"\n用户名：@".$valid."\n"),'handle case and short or long valid values are preserved');
+        check(str_contains($out[0][1]['text'],'📩 @'.$valid.' 发来新消息'),'handle case and short or long valid values are preserved');
     }
     $out=$deliver($message(282900,['from'=>['first_name'=>"名字\n\u{2028}\u{202e}冒充",'username'=>'Current_User']]));$oldCard=$out[1][1]['reply_parameters']['message_id'];
-    check(substr_count($out[0][1]['text'],"\n")===3 && !str_contains($out[0][1]['text'],"\u{202e}") && str_contains($out[0][1]['text'],"\n用户名：@Current_User\n"),'display-name line and bidi controls do not corrupt the separate handle row');
+    check(substr_count($out[0][1]['text'],"\n")===2 && !str_contains($out[0][1]['text'],"\u{202e}") && str_contains($out[0][1]['text'],'📩 @Current_User 发来新消息'),'display-name line and bidi controls do not corrupt the separate handle row');
     $out=$deliver($message(282900,['from'=>['username'=>'Renamed_User']]));
-    check(str_contains($out[0][1]['text'],"\n用户名：@Renamed_User\n"),'new incoming card immediately reflects changed sender username');
+    check(str_contains($out[0][1]['text'],'📩 @Renamed_User 发来新消息'),'new incoming card immediately reflects changed sender username');
+    $profiles[282900]=['id'=>282900,'type'=>'private','username'=>'Renamed_User','first_name'=>'Changed_Name'];
     $out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$oldCard]]));
     check($out[0][0]==='copyMessage' && $out[0][1]['chat_id']===282900,'reply to an earlier card still uses the same numeric ID after a username change');
-    $raw=file_get_contents($bot->store->directory.'/state.json');check(!str_contains($raw,'PRIVATE_USER_TEXT')&&!str_contains($raw,'FIXTURE_PERSONAL_NAME')&&!str_contains($raw,'FIXTURE_PERSONAL_USERNAME')&&!str_contains($raw,'Renamed_User')&&!str_contains($raw,'RESPONSE_CONTENT')&&!str_contains($raw,'ADMIN_PRIVATE_REPLY'),'storage contains no message body, response body, display name or sender handle');
+    check($out[2][1]['text']==='✅ 已回复 @Renamed_User（#282900）' && !isset($out[2][1]['parse_mode']),'success notice uses current live handle, not stale card text or parsed markup');
+    $profiles[282900]=['id'=>282900,'type'=>'private','first_name'=>"名字\n\u{202e}后缀"];
+    $out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$oldCard]]));
+    check($out[2][1]['text']==='✅ 已回复 名字  后缀（#282900）','receipt without a handle uses a sanitized nickname and numeric ID');
+    foreach ([true,[],['id'=>123,'type'=>'private','username'=>'WrongIdentity'],['id'=>282900,'type'=>'group','username'=>'WrongIdentity'],['id'=>'282900','type'=>'private','username'=>'WrongIdentity']] as $badProfile) {
+        $profiles[282900]=$badProfile;$out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$oldCard]]));
+        check($out[2][1]['text']==='✅ 已回复 用户 #282900','malformed or mismatched chat lookup falls back to the routed numeric ID');
+    }
+    unset($profiles[282900]);
+    foreach ([new TelegramApiError(403),new TelegramApiError(429,false,30),new TelegramApiError(0,true)] as $lookupFailure) {
+        $failure=['getChat',$lookupFailure];$u=$message($admin,['reply_to_message'=>['message_id'=>$oldCard]]);$out=$deliver($u);
+        check(array_column($out,0)===['copyMessage','getChat','sendMessage'] && $out[2][1]['text']==='✅ 已回复 用户 #282900' && $bot->store->read()['updates'][$u['update_id']]['status']==='done' && $deliver($u)===[],'optional profile lookup failure preserves confirmed delivery without retrying the reply');
+    }
+    $failure=['copyMessage',new TelegramApiError(403)];$out=$deliver($message($admin,['reply_to_message'=>['message_id'=>$oldCard]]));
+    check(!in_array('getChat',array_column($out,0),true) && !array_filter($out,fn($call)=>str_starts_with($call[1]['text']??'','✅ 已回复')),'failed outgoing copy never fetches a label or claims success');
+    $failure=['sendMessage',new TelegramApiError(429,false,1),$admin];$u=$message($admin,['reply_to_message'=>['message_id'=>$oldCard]]);
+    check(problem(fn()=>$bot->receive($u,$secret),503),'operator success notice rate limit uses existing retry journal');
+    $bot->store->locked(function(&$s)use($bot,$u){$s['updates'][$u['update_id']]['retry_at']=0;$bot->store->save($s);});
+    $out=$deliver($u);
+    check(array_column($out,0)===['getChat','sendMessage'] && $out[1][1]['disable_notification']===true && $deliver($u)===[],'success notice retry remains silent and never duplicates the delivered reply');
+    $raw=file_get_contents($bot->store->directory.'/state.json');check(!str_contains($raw,'PRIVATE_USER_TEXT')&&!str_contains($raw,'FIXTURE_PERSONAL_NAME')&&!str_contains($raw,'FIXTURE_PERSONAL_USERNAME')&&!str_contains($raw,'FIXTURE_LOOKUP_NAME')&&!str_contains($raw,'FixtureRecipient_')&&!str_contains($raw,'Renamed_User')&&!str_contains($raw,'RESPONSE_CONTENT')&&!str_contains($raw,'ADMIN_PRIVATE_REPLY'),'storage contains no message body, response body, display name or sender handle');
     check((fileperms($bot->store->directory.'/state.json')&0777)===0600 && (fileperms($bot->store->directory)&0777)===0700,'private file and directory modes');
     if (function_exists('pcntl_fork')) {
         $u=$message(161616);$log=$dir.'/concurrent.log';$pids=[];

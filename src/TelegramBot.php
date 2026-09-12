@@ -125,6 +125,26 @@ final class TelegramBot
         foreach (['text','photo','document','audio','voice','video','video_note','sticker','animation'] as $field) if (isset($m[$field])) return true;
         return false;
     }
+    /** Presentation only: never use these mutable labels for permissions or routing. */
+    private function identity(array $user): array
+    {
+        $name=trim(mb_substr(preg_replace('/[\x00-\x1f\x7f\p{Cf}\p{Zl}\p{Zp}]/u',' ',is_string($user['first_name']??null)?$user['first_name']:'用户'),0,80))?:'用户';
+        $username=$user['username']??null;
+        $handle=is_string($username) && preg_match('/\A[A-Za-z0-9_]{1,64}\z/D',$username)?'@'.$username:null;
+        return [$name,$handle];
+    }
+    /** Best-effort live label; lookup failure must not undo a confirmed delivery. */
+    private function receiptTarget(#[\SensitiveParameter] array $settings,int $peer): string
+    {
+        try {
+            $chat=$this->api->call($settings['token'],'getChat',['chat_id'=>$peer]);
+            if (is_array($chat) && ($chat['id']??null)===$peer && ($chat['type']??'')==='private') {
+                [$name,$handle]=$this->identity($chat);
+                return ($handle??$name).'（#'.$peer.'）';
+            }
+        } catch (TelegramApiError) {}
+        return '用户 #'.$peer;
+    }
     /** A card click may only answer its human owner in this bot's own private chat. */
     private function cardClick(mixed $query,#[\SensitiveParameter] array $settings): ?array
     {
@@ -184,8 +204,8 @@ final class TelegramBot
                 if (!$admin && (isset($s['blocked'][$peer]) || $rate['count']>10)) { $s['updates'][$id]['status']='done';$this->event($s,$id,'filtered',$peer);$this->store->save($s);return; }
                 $this->store->save($s);
             }
-            $send=function (string $step,int $chat,string $body,?int $route=null,?array $keyboard=null) use (&$s,$id) {
-                $params=['chat_id'=>$chat,'text'=>$body,'link_preview_options'=>['is_disabled'=>true]];
+            $send=function (string $step,int $chat,string $body,?int $route=null,?array $keyboard=null,bool $silent=false) use (&$s,$id) {
+                $params=['chat_id'=>$chat,'text'=>$body,'link_preview_options'=>['is_disabled'=>true],'disable_notification'=>$silent];
                 $params['reply_markup']=$keyboard??['remove_keyboard'=>true];
                 return $this->step($s,$id,$step,'sendMessage',$params,$route);
             };
@@ -220,17 +240,15 @@ final class TelegramBot
                     } elseif (!$this->supported($m)) $send('command',$peer,'请使用文字、图片、文件、语音、视频或贴纸回复。');
                     else {
                         $this->step($s,$id,'reply','copyMessage',['chat_id'=>$route['chat_id'],'from_chat_id'=>$peer,'message_id'=>$m['message_id']]);
-                        $send('receipt',$peer,'已回复用户 #'.$route['chat_id']);
+                        $target=isset($s['updates'][$id]['steps']['receipt'])?'用户 #'.$route['chat_id']:$this->receiptTarget($c,$route['chat_id']);
+                        $send('receipt',$peer,'✅ 已回复 '.$target,silent:true);
                     }
                 } elseif (!$this->supported($m)) $send('command',$peer,'目前支持文字、图片、文件、语音、视频或贴纸，请换一种消息格式。');
                 else {
-                    $name=trim(mb_substr(preg_replace('/[\x00-\x1f\x7f\p{Cf}\p{Zl}\p{Zp}]/u',' ',is_string($m['from']['first_name']??null)?$m['from']['first_name']:'用户'),0,80))?:'用户';
-                    // Display the actual sender's current handle, never a forwarded author;
-                    // reply routes and permissions continue to use immutable numeric IDs.
-                    $username=$m['from']['username']??null;
-                    $handle=is_string($username) && preg_match('/\A[A-Za-z0-9_]{1,64}\z/D',$username)?'@'.$username:'未设置用户名';
-                    $heading=$send('heading',$c['admin_id'],'客服消息 · #'.$peer."\n昵称：".$name."\n用户名：".$handle."\n请回复这张卡片或下方消息。",$peer);
-                    $this->step($s,$id,'incoming','copyMessage',['chat_id'=>$c['admin_id'],'from_chat_id'=>$peer,'message_id'=>$m['message_id'],'reply_parameters'=>['message_id'=>$heading['message_id'],'allow_sending_without_reply'=>true]],$peer);
+                    [$name,$handle]=$this->identity($m['from']);
+                    $body='📩 '.($handle??$name).' 发来新消息'."\n".($handle!==null?'昵称：'.$name:'未设置用户名').' · ID：'.$peer."\n↩️ 回复这张卡片或下方消息即可回信。";
+                    $heading=$send('heading',$c['admin_id'],$body,$peer);
+                    $this->step($s,$id,'incoming','copyMessage',['chat_id'=>$c['admin_id'],'from_chat_id'=>$peer,'message_id'=>$m['message_id'],'disable_notification'=>true,'reply_parameters'=>['message_id'=>$heading['message_id'],'allow_sending_without_reply'=>true]],$peer);
                     // Only acknowledge a confirmed copy. Reserve the cooldown before sending;
                     // a 429 resumes this same step, an ambiguous send is never repeated.
                     if (!array_key_exists('receipt_due',$s['updates'][$id])) {
