@@ -5,17 +5,29 @@ $app = require dirname(__DIR__).'/src/bootstrap.php';
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $mount = $app->config['mount_path'];
 $notFound = static function (): never { http_response_code(404); header('Cache-Control: no-store'); header('Content-Type: text/plain; charset=utf-8'); echo 'Not found'; exit; };
-if ($path === $mount || $path === $mount.'/') MTX\Http::redirect($app->path('/admin/'));
-if (!str_starts_with($path, $mount.'/')) $notFound();
-$route = substr($path, strlen($mount));
-$GLOBALS['mtx_route'] = $route;
-$routes = ['/admin/telegram-announcements.php'=>'admin/telegram-announcements.php','/admin/telegram.php'=>'admin/telegram.php','/api/telegram-webhook.php'=>'api/telegram-webhook.php','/admin'=>'admin/index.php','/admin/'=>'admin/index.php','/admin/index.php'=>'admin/index.php','/admin/login.php'=>'admin/login.php','/admin/action.php'=>'admin/action.php','/api/update.php'=>'api/update.php','/api/download-ticket.php'=>'api/download-ticket.php','/api/download.php'=>'api/download.php'];
-if (in_array($route, ['/assets/app.css','/assets/app.js','/assets/telegram-announcements.js'], true)) {
-    MTX\Http::method('GET','HEAD');
-    header('Content-Type: '.(str_ends_with($route,'.css')?'text/css':'text/javascript').'; charset=utf-8');
-    header('Cache-Control: public, max-age=300');
-    if ($_SERVER['REQUEST_METHOD'] === 'GET') readfile(__DIR__.$route);
-    exit;
+// The API namespace is stable across admin-folder renames. Its root never reveals the admin URL.
+if (str_starts_with($path,$mount.'/')) {
+    $route=substr($path,strlen($mount));$GLOBALS['mtx_route']=$route;
+    $routes=['/api/telegram-webhook.php'=>'api/telegram-webhook.php','/api/update.php'=>'api/update.php','/api/download-ticket.php'=>'api/download-ticket.php','/api/download.php'=>'api/download.php'];
+    if (in_array($route,['/assets/app.css','/assets/app.js','/assets/telegram-announcements.js'],true)) {
+        MTX\Http::method('GET','HEAD');
+        header('Content-Type: '.(str_ends_with($route,'.css')?'text/css':'text/javascript').'; charset=utf-8');
+        header('Cache-Control: public, max-age=300');
+        if ($_SERVER['REQUEST_METHOD']==='GET') readfile(__DIR__.$route);
+        exit;
+    }
+    if (!isset($routes[$route])) $notFound();
+    require __DIR__.'/'.$routes[$route];exit;
 }
-if (!isset($routes[$route])) $notFound();
-require __DIR__.'/'.$routes[$route];
+if (!preg_match('~\A/([A-Za-z0-9][A-Za-z0-9_-]{0,63})(?:/(.*))?\z~',$path,$parts)) $notFound();
+$folder=$parts[1];$file=$parts[2]??'';
+$adminFiles=[''=>'index.php','index.php'=>'index.php','login.php'=>'login.php','action.php'=>'action.php','telegram.php'=>'telegram.php','telegram-announcements.php'=>'telegram-announcements.php'];
+if (!isset($adminFiles[$file])) $notFound();
+// Unknown URLs get a plain 404, even if the configured admin directory is missing.
+$marker=__DIR__.'/'.$folder.'/.mtx-admin';
+if (is_link(__DIR__.'/'.$folder) || is_link($marker) || !is_file($marker)) $notFound();
+if ($folder!==$app->adminDirectory()) $notFound();
+$GLOBALS['mtx_route']='/admin/'.$file;
+$handler=__DIR__.'/'.$app->adminDirectory().'/'.$adminFiles[$file];
+if (is_link($handler) || !is_file($handler)) $notFound();
+require $handler;

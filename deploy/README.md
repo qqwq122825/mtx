@@ -6,7 +6,7 @@
 2. 使用 PHP 8.3+ 最新维护补丁，启用 zip、sodium、openssl、mbstring、dom、libxml。
 3. 源码部署先执行 Composer 安装；部署压缩包已有 vendor。
 4. 在服务器终端执行 `php /srv/mtx/bin/setup.php --url https://你的域名`，交互输入管理密码。setup 自动生成随机入口目录，请保存输出地址；主页保持 404。已绑定安装器部署时，使用配套私有配置，不要重新生成密钥。
-5. 设置 Nginx Web 根目录为 `/srv/mtx/public`，配置 PHP-FPM 和 HTTPS；将同目录 nginx.conf.example 的 RANDOM_ENTRY 替换成配置中的入口（去掉前导 /）。
+5. 设置 Nginx Web 根目录为 `/srv/mtx/public`，配置 PHP-FPM 和 HTTPS；将同目录 nginx.conf.example 的 RANDOM_ENTRY 替换成配置中的 API 入口（去掉前导 /），后台默认为 `/admin/`。
 6. 只让 PHP-FPM 用户读私有配置、写 storage；代码目录保持只读。目录权限按实际运行用户设置，避免使用全员可写权限。
 
 setup 不覆盖已有配置或状态，也不会在网页暴露安装入口。
@@ -66,7 +66,7 @@ unset MTX_PASSWORD
 
 ## 8. Telegram 客服
 
-部署更新后的 `public`、`src` 和 Nginx 示例规则：后台新增 `/<随机入口>/admin/telegram.php`，Webhook 为 `/<随机入口>/api/telegram-webhook.php`。启用 PHP curl，允许出站访问 api.telegram.org:443；Webhook 在 CDN 上不缓存、不挑战，保留 secret 校验头。生产后台填 Token / 个人数字 ID 后启用。
+部署更新后的 `public`、`src` 和 Nginx 示例规则：后台默认 `/admin/telegram.php`（跟随后台文件夹名），Webhook 为 `/<随机入口>/api/telegram-webhook.php`。启用 PHP curl，允许出站访问 api.telegram.org:443；Webhook 在 CDN 上不缓存、不挑战，保留 secret 校验头。生产后台填 Token / 个人数字 ID 后启用。
 
 机器人配置和关联记录在 `storage/telegram/`，更新时保留，备份时按密钥级别保护。首次部署压缩包不携带该目录的配置和历史。详见 [Telegram 客服说明](../docs/telegram-support.md)。
 
@@ -75,3 +75,9 @@ unset MTX_PASSWORD
 后台 → Telegram 客服 → 公告卡片。按最新 Nginx 模板增加公告页和预览脚本白名单；在生产密码后台配置群组 / 频道和本人官方入口。
 
 若启用定时发送或自动删除，按 `deploy/telegram-cron.example` 每分钟运行 `bin/telegram-tick.php`，使用与 PHP-FPM 相同的用户、私有配置和 storage。后台显示最近运行时间；脚本未运行时定时功能不执行。详见 [公告说明](../docs/telegram-announcements.md)。不要用新站 PRIVATE 包覆盖旧站数据。
+
+## 10. 默认 admin 与直接改名
+
+后台默认 `/admin/`；在服务器把 `public/admin` 整个文件夹改名，入口即随名称变化，不需要改 PHP 配置。保留 `.mtx-admin`，public 内只放一份后台；更新时将 admin 内容放入现有自定义名称的目录，不要并排创建第二份。
+
+旧版部署先应用新版 Nginx 通用后台规则，此后改目录无需改 Nginx；CDN/WAF 的目录匹配规则同步调整。API 随机路径、安装器、密钥和机器人 Webhook 均不变。见 [后台目录说明](../docs/admin-directory.md)。

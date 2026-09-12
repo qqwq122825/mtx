@@ -6,8 +6,7 @@ server {
     listen 80;
     server_name mtx.jk92.cc;
     location = / { return 404; }
-    location ^~ /RANDOM_ENTRY/ { return 301 https://$host$request_uri; }
-    location / { return 404; }
+    location / { return 308 https://$host$request_uri; }
 }
 server {
     listen 443 ssl;
@@ -18,8 +17,9 @@ server {
     client_max_body_size 260m;
     client_body_timeout 300s;
 
-    location = /RANDOM_ENTRY { return 302 /RANDOM_ENTRY/admin/; }
-    location ~ ^/RANDOM_ENTRY(/|/admin(/(index|login|action|telegram|telegram-announcements)\.php|/)?)$ {
+    # Folder name is discovered by PHP via .mtx-admin; no Nginx edit after renaming.
+    # Only these page filenames reach the front controller, never direct PHP files.
+    location ~ "^/[A-Za-z0-9][A-Za-z0-9_-]{0,63}(/(index|login|action|telegram|telegram-announcements)\.php|/)?$" {
         limit_req zone=mtx_admin burst=15 nodelay;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root/index.php;

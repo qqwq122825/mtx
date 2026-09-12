@@ -51,7 +51,7 @@ cd /srv/mtx && /usr/bin/php bin/telegram-tick.php
 
 后台显示最近运行时间；超过 3 分钟提示脚本未运行 / 停止。脚本只输出处理数量，失败返回非零退出码和通用提示；按服务器习惯配置日志轮转和失败监控。一次最多处理 10 个动作，动作之间释放锁，软时间预算约 30 秒（在途请求可能超出）。多进程共用同一文件锁和意图记录，避免重复投递。
 
-更新 Nginx 白名单：新增 `/<随机入口>/admin/telegram-announcements.php` 以及 `/<随机入口>/assets/telegram-announcements.js`，参照最新模板。后台与接口继续使用既有随机入口和密码，不开放旧根路径。
+公告后台默认为 `/admin/telegram-announcements.php`，跟随后台文件夹重命名；预览脚本仍为 `/<随机入口>/assets/telegram-announcements.js`。应用最新 Nginx 模板后，后台文件夹直接改名即可。详见 [后台目录说明](admin-directory.md)。
 
 ## 文件、重试与更换机器人
 

@@ -6,6 +6,7 @@ final class App
     public readonly Store $store;
     public readonly array $config;
     public readonly string $storage;
+    private ?string $adminDirectory = null;
     public function __construct()
     {
         $root = dirname(__DIR__);
@@ -28,7 +29,13 @@ final class App
         }
         GameIds::validate($this->store->read());
     }
-    public function path(string $path): string { return $this->config['mount_path'] . $path; }
+    public function adminDirectory(): string
+    { return $this->adminDirectory ??= AdminDirectory::name(dirname(__DIR__).'/public',$this->config['mount_path']); }
+    public function path(string $path): string
+    {
+        if ($path==='/admin' || str_starts_with($path,'/admin/')) return '/'.$this->adminDirectory().substr($path,6);
+        return $this->config['mount_path'].$path;
+    }
     public function url(string $path): string { return rtrim($this->config['base_url'], '/') . $this->path($path); }
     public function object(string $sha): string
     {

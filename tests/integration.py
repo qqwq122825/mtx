@@ -38,10 +38,13 @@ class Client:
         elif fields is not None:
             body = urllib.parse.urlencode(fields).encode()
             headers['Content-Type'] = 'application/x-www-form-urlencoded'
-        if path.startswith(self.base): path = path[len(self.base):]
-        prefix = urllib.parse.urlparse(self.base).path
-        if prefix and path.startswith(prefix+'/'): path = path[len(prefix):]
-        req = urllib.request.Request(self.base + path, data=body, headers=headers, method=method)
+        parsed = urllib.parse.urlparse(self.base)
+        origin = parsed.scheme + '://' + parsed.netloc
+        if path.startswith('http'): url = path
+        elif path == '/admin' or path.startswith('/admin/'): url = origin + path
+        elif parsed.path and path.startswith(parsed.path+'/'): url = origin + path
+        else: url = self.base + path
+        req = urllib.request.Request(url, data=body, headers=headers, method=method)
         try: response = self.opener.open(req, timeout=30)
         except urllib.error.HTTPError as exc: response = exc
         return response.code, response.read(), dict(response.headers)
@@ -98,14 +101,14 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
             try: client.request('/admin/login.php'); break
             except (urllib.error.URLError, ConnectionError): time.sleep(.1)
         else: raise AssertionError('PHP server did not start')
-        for hidden in ['/', '/admin/', '/admin/login.php', '/api/update.php', '/assets/app.css', '/index.php']:
+        for hidden in ['/', mount+'/admin/', mount+'/admin/login.php', '/api/update.php', '/assets/app.css', '/index.php']:
             check(public_client.request(hidden)[0] == 404, 'unmounted route hidden: ' + hidden)
         status, data, headers = client.request('/admin/')
-        check(status == 303 and headers.get('Location') == mount + '/admin/login.php', 'admin requires password login')
+        check(status == 303 and headers.get('Location') == '/admin/login.php', 'admin requires password login')
         status, data, headers = client.request('/admin/login.php')
         check(status == 200 and b'password' in data, 'login page renders')
-        check((mount+'/admin/login.php').encode() in data and (mount+'/assets/app.css').encode() in data, 'prefixed form and asset URLs')
-        check(all(c.path == mount+'/admin' for c in client.cookies), 'session cookie scoped to private admin')
+        check(b'/admin/login.php' in data and (mount+'/assets/app.css').encode() in data, 'physical admin folder and stable API-namespace asset URLs')
+        check(all(c.path == '/admin' for c in client.cookies), 'session cookie scoped to private admin')
         check('frame-ancestors' in headers.get('Content-Security-Policy',''), 'CSP supplied')
         cookies = str(headers.get('Set-Cookie', ''))
         check(any(c.has_nonstandard_attr('HttpOnly') for c in client.cookies), 'session cookie HttpOnly')
@@ -114,7 +117,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
         status, _, _ = client.request('/admin/login.php', fields={'csrf':client.csrf(),'password':'wrong'})
         check(status == 401, 'incorrect password rejected')
         status, _, headers = client.request('/admin/login.php', fields={'csrf':client.csrf(),'password':PASSWORD})
-        check(status == 303 and headers.get('Location') == mount + '/admin/', 'correct password logs in')
+        check(status == 303 and headers.get('Location') == '/admin/', 'correct password logs in')
         check(state()['apps']['mtx-dfm-cn']['game_id']==1 and state()['next_game_id']==2, 'setup initializes stable numeric ID and next counter')
         token = client.csrf()
         status, data, _ = client.request('/admin/')

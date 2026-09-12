@@ -6,7 +6,8 @@
 
 ## 已实现
 
-- 随机目录入口，主页与旧管理路径 404；无用户名，仅密码登录。
+- 后台默认 `/admin/`，直接重命名 public 下的后台文件夹即可变更入口；无用户名，仅密码登录。
+- 安装器 API 保留固定随机前缀，主页和旧后台路径 404，不泄露新后台地址。
 - 单管理员密码登录、CSRF、8 小时会话、错误密码限流、退出登录。
 - 游戏 ID 自动分配、统一接口地址、预期 Bundle ID、启用/停用。
 - TIPA 上传进度、XML/binary plist 元数据识别、ZIP 路径/大小/CRC/身份检查。
@@ -47,7 +48,7 @@ php bin/setup.php --url http://127.0.0.1:8787 --local-http
 sh bin/serve.sh
 ```
 
-setup 会在终端交互读取密码，不写入 Git、不使用默认密码。setup 会输出随机后台入口：`http://127.0.0.1:8787/<随机入口>/admin/`；请保存，不在主页公开。
+setup 会在终端交互读取密码，不写入 Git、不使用默认密码。setup 会输出默认后台入口：`http://127.0.0.1:8787/admin/`。直接重命名 `public/admin` 即可更改后台地址，保留其中 `.mtx-admin` 文件；详见 [后台目录说明](docs/admin-directory.md)。安装器 API 的随机前缀独立保留。
 
 如果系统默认 PHP 过旧，用 PHP 8.3+ 的绝对路径执行 setup；serve 使用 `PHP_BINARY=/实际路径/php sh bin/serve.sh`。端口修改时需同步私有配置中的 base_url。
 

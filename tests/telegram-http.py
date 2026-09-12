@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
     def request(path,fields=None,body=None,headers=None,method=None):
         headers=dict(headers or {})
         if fields is not None:body=urllib.parse.urlencode(fields).encode();headers['Content-Type']='application/x-www-form-urlencoded'
-        req=urllib.request.Request(path if path.startswith('http') else base+path,data=body,headers=headers,method=method)
+        req=urllib.request.Request(path if path.startswith('http') else (origin+path if path.startswith('/admin/') else base+path),data=body,headers=headers,method=method)
         try:r=opener.open(req,timeout=10)
         except urllib.error.HTTPError as e:r=e
         return r.status,r.read(),dict(r.headers)
@@ -32,14 +32,14 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
             except urllib.error.URLError:time.sleep(.1)
         check(request('/admin/telegram.php')[0]==303,'bot panel requires password session')
         check(request('/admin/telegram-announcements.php')[0]==303,'announcement panel requires password session')
-        check(request(origin+'/admin/telegram-announcements.php')[0]==404,'announcement route hidden outside mount')
+        check(request(base+'/admin/telegram-announcements.php')[0]==404,'old prefixed announcement route removed')
         check(request('/bin/telegram-tick.php')[0]==404,'scheduler is CLI-only, no public trigger')
         check(request('/admin/telegram.php',fields={'action':'save'})[0]==303,'unauthenticated bot changes require login')
-        for path in ['/admin/telegram.php','/api/telegram-webhook.php','/storage/telegram/state.json']:
+        for path in [mount+'/admin/telegram.php','/api/telegram-webhook.php','/storage/telegram/state.json']:
             check(request(origin+path)[0]==404,'bot routes hidden outside mount: '+path)
         login=csrf('/admin/login.php');check(request('/admin/login.php',fields={'csrf':login,'password':password})[0]==303,'password login')
         code,html,headers=request('/admin/telegram.php');check(code==200 and headers.get('Cache-Control')=='no-store','bot panel is private and not cached')
-        check(b'type="password"' in html and b'name="admin_id"' in html and (mount+'/admin/telegram.php').encode() in html,'password Token input and prefixed action')
+        check(b'type="password"' in html and b'name="admin_id"' in html and b'/admin/telegram.php' in html,'password Token input and prefixed action')
         check(request('/admin/telegram.php',fields={'csrf':'bad','action':'save','token':'bad','admin_id':'1'})[0]==403,'bot configuration CSRF enforced')
         ann='/admin/telegram-announcements.php'
         code,page,headers=request(ann)

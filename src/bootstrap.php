@@ -16,7 +16,8 @@ set_exception_handler(function (Throwable $e) {
         echo json_encode(['error'=>['code'=>$e instanceof MTX\Problem?$e->kind:'server_error','message'=>$message],'request_id'=>$id],JSON_UNESCAPED_UNICODE);
     } else {
         header('Content-Type: text/html; charset=utf-8');
-        echo '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MTX · 操作提示</title><link rel="stylesheet" href="'.MTX\Http::escape(($GLOBALS['mtx_app']??null)?->path('/assets/app.css')??'').'"><main class="error-page"><div class="eyebrow">MTX UPDATE CENTER</div><h1>本次操作未完成</h1><p>'.MTX\Http::escape($message).'</p><p class="muted">请求编号 '.MTX\Http::escape($id).'</p><a class="button" href="'.MTX\Http::escape(($GLOBALS['mtx_app']??null)?->path('/admin/')??'').'">返回后台</a></main></html>';
+        try { $adminPath=($GLOBALS['mtx_app']??null)?->path('/admin/')??'/'; } catch (Throwable) { $adminPath='/'; }
+        echo '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MTX · 操作提示</title><link rel="stylesheet" href="'.MTX\Http::escape(($GLOBALS['mtx_app']??null)?->path('/assets/app.css')??'').'"><main class="error-page"><div class="eyebrow">MTX UPDATE CENTER</div><h1>本次操作未完成</h1><p>'.MTX\Http::escape($message).'</p><p class="muted">请求编号 '.MTX\Http::escape($id).'</p><a class="button" href="'.MTX\Http::escape($adminPath).'">返回后台</a></main></html>';
     }
 });
 header('X-Content-Type-Options: nosniff');

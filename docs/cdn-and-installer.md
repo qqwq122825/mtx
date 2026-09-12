@@ -2,9 +2,9 @@
 
 ## 路由与登录
 
-- `config.local.php` 的 `mount_path` 是随机的 `/r-` 加 24 位十六进制字符。根路径、旧 `/admin/`、旧 `/api/` 均 404，没有主页跳转或入口列表。
-- 后台是 `https://mtx.jk92.cc/<随机入口>/admin/`，只有管理密码，没有用户名。密码 hash 在服务器私有 PHP 配置校验，数据和会话写入服务器目录，不使用数据库。
-- 管理 Cookie 仅覆盖该入口的 `/admin`；所有管理动作有 CSRF 校验。首次 setup 直接生成数字游戏 ID、随机路径和两套签名密钥。按未上线项目处理，删除旧配置/旧安装器迁移分支。
+- `config.local.php` 的 `mount_path` 是随机的 `/r-` 加 24 位十六进制字符。该前缀仅用于 API 和共享资源。主页、旧随机前缀后台和未加前缀的 `/api/` 均 404，没有主页跳转或入口列表。
+- 后台默认是 `https://mtx.jk92.cc/admin/`，直接重命名 `public/admin` 可改变入口（见 [后台目录说明](admin-directory.md)），只有管理密码，没有用户名。密码 hash 在服务器私有 PHP 配置校验，数据和会话写入服务器目录，不使用数据库。
+- 管理 Cookie 仅覆盖当前后台文件夹路径；所有管理动作有 CSRF 校验。首次 setup 直接生成数字游戏 ID、API 随机路径和两套签名密钥。按未上线项目处理，删除旧配置/旧安装器迁移分支。
 - 随机路径会出现在安装器中，不是密码，不能防止带宽型 DDoS。上线仍需 CDN/WAF、源站防火墙、限流。
 
 ## CDN / Nginx
@@ -13,7 +13,7 @@
 
 | 路径 | 缓存 | 规则 |
 |---|---|---|
-| `/<入口>/admin*` | Bypass / no-store | 优先 IP 白名单；可使用浏览器挑战；保留 POST、Cookie 和 CSRF 字段 |
+| `/admin/*` 或重命名后的后台目录 | Bypass / no-store | 优先 IP 白名单；可使用浏览器挑战；保留 POST、Cookie 和 CSRF 字段 |
 | `/<入口>/api/telegram-webhook.php` | Bypass | POST JSON，保留 X-Telegram-Bot-Api-Secret-Token，256 KiB 上限，无挑战/跳转 |
 | `/<入口>/api/update.php` | Bypass | 含 nonce 的动态签名响应；禁止 JS 挑战、HTML 注入、缓存、重定向 |
 | `/<入口>/api/download-ticket.php` | Bypass | POST JSON；禁止挑战、缓存、重定向 |
