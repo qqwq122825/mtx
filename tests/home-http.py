@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-home-http-') as t:
             return request('/admin/home.php',body=b''.join(parts),headers={'Content-Type':'multipart/form-data; boundary='+boundary})
         check(upload(b'bad')[0]==422,'invalid archive rejected')
         check(upload(payload.getvalue())[0]==303,'upload game installer')
-        check(b'/installer?game_id=1' in request(origin+'/')[1],'per game download on home')
+        check(b'/installer?game_id=1' in request(origin+'/?view=downloads')[1],'per game download on list')
         code,body,headers=request(origin+'/installer?game_id=1')
         check(code==200 and body==payload.getvalue() and 'attachment' in headers['Content-Disposition'],'public download bytes match installer')
         check(request(origin+'/installer?game_id=999')[0] in (404,422),'unknown game rejected')
