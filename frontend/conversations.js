@@ -25,7 +25,7 @@ createApp({setup(){
     h('div',{class:'conversation-metrics'},['all','waiting','replied','exception'].map(key=>h('button',{class:['conversation-metric',filter.value===key?'selected':''],onClick:()=>{filter.value=key;load(true);}},[h('span',key==='all'?'全部会话':stateLabels[key]),h('strong',String(counts.value[key]))]))),
     h('section',{class:'panel conversation-table-panel'},[
       h('div',{class:'conversation-toolbar'},[
-        h(ElInput,{modelValue:q.value,'onUpdate:modelValue':v=>q.value=v,placeholder:'搜索昵称、@用户名、ID 或最近消息',maxlength:100,clearable:true,'aria-label':'搜索客服会话',onKeydown:e=>{if(e.key==='Enter')load(true);}}),
+        h(ElInput,{modelValue:q.value,'onUpdate:modelValue':v=>q.value=v,placeholder:'搜索昵称、@用户名、ID、最近咨询或回复',maxlength:100,clearable:true,'aria-label':'搜索客服会话',onKeydown:e=>{if(e.key==='Enter')load(true);}}),
         h(ElSelect,{modelValue:filter.value,'onUpdate:modelValue':v=>{filter.value=v;load(true);},'aria-label':'回复状态'},()=>['all','waiting','replied','exception'].map(key=>h(ElOption,{label:key==='all'?'全部状态':stateLabels[key],value:key}))),
         h(ElButton,{type:'primary',onClick:()=>load(true),loading:loading.value},()=> '查询'),
         h(ElButton,{onClick:()=>load(),disabled:loading.value},()=> '刷新')]),
@@ -33,7 +33,14 @@ createApp({setup(){
       error.value?h('div',{class:'notice error',role:'alert'},error.value):null,
       h(ElTable,{data:rows.value,stripe:true,border:false,rowKey:'peer',emptyText:loading.value?'正在加载…':'暂无匹配的会话。收到新的用户咨询后会出现在这里。',onRowDblclick:row=>detail(row)},()=>[
         column('用户',{minWidth:205},row=>h('div',{class:'conversation-person'},[h('strong',row.name),row.username?h('a',{href:`https://t.me/${row.username}`,target:'_blank',rel:'noopener noreferrer'},'@'+row.username):h('span',{class:'muted'},'未设置用户名'),h('small','#'+row.peer)])),
-        column('最近消息',{minWidth:300},row=>h('div',{class:'conversation-preview'},[h('span',{class:'conversation-direction'},row.last_direction==='out'?'客服回复':'用户消息'),h('span',row.last_text||'[无文字内容]')])),
+        ...[['用户最近咨询','last_in'],['客服最近回复','last_out']].map(([label,key])=>column(label,{minWidth:260},row=>{
+          const m=row[key];
+          return h('div',{class:'conversation-preview'},m?[
+            h('span',m.text||'[无文字内容]'),
+            h('small',{class:'conversation-direction'},stamp(m.at)),
+            m.status!=='delivered'?h('small',{class:'conversation-error'},sendLabels[m.status]||m.status):null
+          ]:[h('span',{class:'muted'},key==='last_out'?'暂无回复':'暂无保留的咨询')]);
+        })),
         column('状态',{width:130},statusTag),column('最近时间',{width:165},row=>stamp(row.last_at)),column('消息数',{prop:'count',width:85}),
         column('操作',{width:110,fixed:'right'},row=>h(ElButton,{link:true,type:'primary',onClick:()=>detail(row)},()=> '查看会话'))]),
       h('div',{class:'conversation-pagination'},h(ElPagination,{currentPage:page.value,'onUpdate:currentPage':v=>{page.value=v;load();},pageSize:20,total:total.value,layout:'total, prev, pager, next',background:true}))]),

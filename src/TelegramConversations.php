@@ -75,8 +75,12 @@ final class TelegramConversations
         if (!in_array($filter,['all','waiting','replied','exception'],true)) throw new Problem(422,'会话筛选格式异常。');
         $page=max(1,Http::integer($query+['page'=>'1'],'page'));$rows=[];
         foreach ($h['messages'] as $m) {
-            $peer=$m['peer'];$row=$rows[$peer]??['peer'=>$peer,'name'=>'用户','username'=>'','last_at'=>0,'last_update'=>-1,'last_text'=>'','last_direction'=>'','delivery'=>'pending','incoming'=>-1,'outgoing'=>-1,'count'=>0];
+            $peer=$m['peer'];$row=$rows[$peer]??['peer'=>$peer,'name'=>'用户','username'=>'','last_at'=>0,'last_update'=>-1,'last_text'=>'','last_direction'=>'','delivery'=>'pending','incoming'=>-1,'outgoing'=>-1,'count'=>0,'last_in'=>null,'last_out'=>null];
             $row['count']++;
+            $slot=$m['direction']==='in'?'last_in':'last_out';
+            if ($row[$slot]===null || $m['update']>=$row[$slot]['update']) {
+                $row[$slot]=['update'=>$m['update'],'at'=>$m['at'],'status'=>$m['status'],'text'=>mb_substr(($m['type']==='text'?'':'['.$m['type'].'] ').$m['text'].($m['file_name']?' '.$m['file_name']:''),0,160)];
+            }
             if ($m['direction']==='in' && $m['update']>=$row['incoming']) { $row['name']=$m['name']?:'用户';$row['username']=$m['username'];$row['incoming']=max($row['incoming'],$m['update']); }
             if ($m['direction']==='out' && $m['status']==='delivered') $row['outgoing']=max($row['outgoing'],$m['update']);
             if ($m['update']>=$row['last_update']) {
@@ -88,7 +92,7 @@ final class TelegramConversations
         $counts=['all'=>count($rows),'waiting'=>0,'replied'=>0,'exception'=>0];
         foreach ($rows as &$r) { $r['status']=$r['delivery']!=='delivered'?'exception':($r['outgoing']>=$r['incoming']?'replied':'waiting');$counts[$r['status']]++; }
         unset($r);
-        $rows=array_values(array_filter($rows,fn($r)=>($filter==='all'||$r['status']===$filter) && ($q===''||str_contains(mb_strtolower($r['name'].' @'.$r['username'].' '.$r['peer'].' '.$r['last_text']),$q))));
+        $rows=array_values(array_filter($rows,fn($r)=>($filter==='all'||$r['status']===$filter) && ($q===''||str_contains(mb_strtolower($r['name'].' @'.$r['username'].' '.$r['peer'].' '.($r['last_in']['text']??'').' '.($r['last_out']['text']??'')),$q))));
         usort($rows,fn($a,$b)=>$b['last_update']<=>$a['last_update']);$total=count($rows);$page=min($page,max(1,(int)ceil($total/20)));
         return ['rows'=>array_slice($rows,($page-1)*20,20),'total'=>$total,'page'=>$page,'page_size'=>20,'counts'=>$counts,'enabled'=>$h['enabled'],'days'=>$h['days'],'revision'=>$h['revision'],'max_messages'=>self::MAX_MESSAGES];
     }

@@ -20,6 +20,9 @@ try{
  $reply=$message(77777,'我会尽快处理',['reply_to_message'=>['message_id'=>$copy,'text'=>'QUOTED_PRIVATE_NOT_STORED']]);$receive($reply);$detail=$history->detail($settings,['peer'=>'88888']);
  check($detail['total']===2&&$detail['messages'][1]['direction']==='out'&&$detail['messages'][1]['status']==='delivered','operator response text and successful delivery recorded');
  check($history->listing($settings,[])['rows'][0]['status']==='replied','confirmed operator response changes list to replied');
+ $row=$history->listing($settings,[])['rows'][0];
+ check($row['last_in']['text']===mb_substr($u['message']['text'],0,160)&&$row['last_out']['text']==='我会尽快处理','list separates latest user question and operator reply');
+ check($history->listing($settings,['q'=>'第二行'])['total']===1,'search matches question after operator reply');
  $receive($message(88888,'新的问题',['from'=>['username'=>'NewHistoryHandle']]));check($history->listing($settings,[])['rows'][0]['status']==='waiting'&&$history->listing($settings,[])['rows'][0]['username']==='NewHistoryHandle','new question reopens waiting state and updates handle');
  $failure=['copyMessage',new TelegramApiError(403)];$receive($message(77777,'未送达的回复',['reply_to_message'=>['message_id'=>$copy]]));
  check($history->listing($settings,[])['rows'][0]['status']==='exception'&&array_slice($history->detail($settings,['peer'=>'88888'])['messages'],-1)[0]['status']==='failed','failed reply never appears as successfully sent');
