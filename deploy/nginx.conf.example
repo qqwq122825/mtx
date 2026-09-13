@@ -5,7 +5,6 @@ limit_req_zone $binary_remote_addr zone=mtx_admin:10m rate=2r/s;
 server {
     listen 80;
     server_name mtx.jk92.cc;
-    location = / { return 404; }
     location / { return 308 https://$host$request_uri; }
 }
 server {
@@ -17,9 +16,19 @@ server {
     client_max_body_size 260m;
     client_body_timeout 300s;
 
+    # Public homepage, stylesheet and current per-game installer downloads.
+    location ~ "^/(|home[.]css|installer)$" {
+        limit_req zone=mtx_api burst=30 nodelay;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root/index.php;
+        fastcgi_param SCRIPT_NAME /index.php;
+        fastcgi_param HTTPS on;
+        fastcgi_pass unix:/run/php/php8.5-fpm.sock;
+        fastcgi_read_timeout 600s;
+    }
     # Folder name is discovered by PHP via .mtx-admin; no Nginx edit after renaming.
     # Only these page filenames reach the front controller, never direct PHP files.
-    location ~ "^/[A-Za-z0-9][A-Za-z0-9_-]{0,63}(/(index|login|action|telegram|telegram-announcements)\.php|/)?$" {
+    location ~ "^/[A-Za-z0-9][A-Za-z0-9_-]{0,63}(/(index|login|action|home|telegram|telegram-announcements)\.php|/)?$" {
         limit_req zone=mtx_admin burst=15 nodelay;
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root/index.php;
