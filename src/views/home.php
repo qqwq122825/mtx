@@ -12,7 +12,7 @@ $downloads=($_GET['view']??'')==='downloads';
 <main class="shell"><section class="hero">
 <span class="badge">MTX 软件服务入口</span>
 <h1><?=$downloads?'安装器下载':'软件下载主页'?></h1>
-<p class="intro"><?=$downloads?'选择对应游戏，下载专属安装器。':'购买前往官方卡网，下载获取游戏安装器。'?></p>
+<?php if ($downloads): ?><p class="intro">选择对应游戏，下载专属安装器。</p><?php endif ?>
 <?php if (!$downloads): ?>
 <nav class="actions" aria-label="主要入口">
 <?php if ($home['buy_url']!==''): ?><a class="button primary" href="<?=MTX\Http::escape($home['buy_url'])?>" rel="noopener noreferrer">购买</a><?php else: ?><span class="button disabled" aria-disabled="true">购买暂未开放</span><?php endif ?>
