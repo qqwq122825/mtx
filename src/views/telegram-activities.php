@@ -9,10 +9,10 @@ function trialHidden(string $action): void { global $t; hidden($action);echo '<i
 $records=array_reverse(array_filter($t['cards'],fn($card)=>$card['status']!=='available'),true);$records=array_slice($records,0,100,true);
 $trialLabels=['reserved'=>'已预留 · 待确认','delivered'=>'已发送','uncertain'=>'发送结果待确认','failed'=>'发送失败 · 保留原卡'];
 ?>
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>活动设置 · 满天星</title><link rel="stylesheet" href="<?=e($app->path('/assets/app.css'))?>"><script src="<?=e($app->path('/assets/app.js'))?>" defer></script></head><body>
-<header class="topbar bot-topbar"><a class="brand" href="<?=e($app->path('/admin/'))?>">✳ 满天星<span class="brand-sub">UPDATE CENTER</span></a><a class="button quiet" href="<?=e($app->path('/admin/telegram.php'))?>">返回客服</a></header>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>活动设置 · 满天星</title><link rel="stylesheet" href="<?=e($app->path('/assets/app.css'))?>?v=admin2"><script src="<?=e($app->path('/assets/app.js'))?>?v=admin2" defer></script><?php MTX\AdminLayout::assets($app); ?></head><body>
+<?php MTX\AdminLayout::begin($app,'活动与卡密','activities'); ?>
 <main class="content bot-page"><div class="page-heading"><div><div class="eyebrow">TELEGRAM / ACTIVITIES</div><h1>活动设置</h1><p class="muted">两小时测试卡预设，一键开启，随时结束。</p></div><span class="subtle-tag"><?=$activity?($activity['enabled']?'领取已开启':'领取已暂停'):'尚未创建活动'?></span></div>
-<nav class="bot-tabs" aria-label="机器人管理"><a href="<?=e($app->path('/admin/telegram.php'))?>">连接与客服</a><a href="<?=e($app->path('/admin/telegram-announcements.php'))?>">公告卡片</a><a aria-current="page" href="<?=e($action)?>">活动设置</a><a href="<?=e($app->path('/admin/telegram.php'))?>?view=conversations">客服会话</a></nav>
+
 <?php if ($notice): ?><div class="notice <?=$notice['ok']?'success':'error'?>" role="status"><?=e($notice['text'])?></div><?php endif ?>
 <div class="metrics"><section class="metric"><span>可领取库存</span><strong><?=$stats['available']?></strong><small>完整卡密仅存服务器私有目录</small></section><section class="metric"><span>已分配</span><strong><?=$stats['allocated']?></strong><small>包括已发送、待确认和发送失败</small></section><section class="metric"><span>需要核对</span><strong><?=$stats['attention']?></strong><small>保留原卡，不自动退回库存</small></section></div>
 <div class="work-grid"><section class="panel"><div class="section-title"><div><span class="step-number">01</span><h2>活动预设</h2></div></div>
@@ -30,4 +30,4 @@ $trialLabels=['reserved'=>'已预留 · 待确认','delivered'=>'已发送','unc
 <p class="muted compact">“已发送”代表 Telegram 接收成功，不代表用户已读或卡片已激活。保留数字 ID 是为了限领和核对，不记录用户名或聊天内容。</p></section>
 <?php if ($activity): ?><section class="panel bot-records"><div class="section-title"><h2>结束并删除活动</h2></div><p class="muted compact">只是暂时不发卡，请使用“暂停领取”。删除会清除本活动的配置和全部卡密原文，已发 Telegram 消息不撤回。当天限领记录及已分配卡的 SHA-256 指纹继续保留，重新创建也不会给同一用户当天多发、或重复导入已分配卡。新活动使用新的按钮标识，旧按钮永久失效。</p>
 <form method="post" action="<?=e($action)?>" class="bot-form" data-confirm="确认删除活动和全部库存原文？此操作不撤回已发卡片，暂停领取可保留库存。"><?php trialHidden('trial_delete') ?><label for="trial-delete">输入“删除活动”确认</label><input id="trial-delete" name="confirm_delete" required autocomplete="off" placeholder="删除活动"><button class="text-button danger" type="submit">删除活动及库存</button></form></section><?php endif ?>
-<footer class="page-footer">MTX 活动管理<span>单活动预设 · 私有目录存储 · 无数据库</span></footer></main></body></html>
+<footer class="page-footer">MTX 活动管理<span>单活动预设 · 私有目录存储 · 无数据库</span></footer></main><?php MTX\AdminLayout::end(); ?></body></html>

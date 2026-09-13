@@ -101,7 +101,8 @@ with tempfile.TemporaryDirectory(prefix='mtx-tests-') as tmp:
             try: client.request('/admin/login.php'); break
             except (urllib.error.URLError, ConnectionError): time.sleep(.1)
         else: raise AssertionError('PHP server did not start')
-        for hidden in ['/', mount+'/admin/', mount+'/admin/login.php', '/api/update.php', '/assets/app.css', '/index.php']:
+        check(public_client.request('/')[0] == 200, 'public homepage is available without exposing backend')
+        for hidden in [mount+'/admin/', mount+'/admin/login.php', '/api/update.php', '/assets/app.css', '/index.php']:
             check(public_client.request(hidden)[0] == 404, 'unmounted route hidden: ' + hidden)
         status, data, headers = client.request('/admin/')
         check(status == 303 and headers.get('Location') == '/admin/login.php', 'admin requires password login')

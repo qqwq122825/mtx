@@ -49,6 +49,17 @@ with tempfile.TemporaryDirectory(prefix='mtx-admin-folder-') as t:
         for file in ['telegram.php','telegram-announcements.php']:
             code,body,_=request('/'+folder+'/'+file);check(code==200 and ('/'+folder+'/').encode() in body and (mount+'/admin/').encode() not in body,'bot page and links follow rename: '+file)
         check(request('/'+folder+'/action.php',fields={'action':'toggle','game_id':'1','csrf':'bad','revision':'0'})[0]==403,'renamed admin actions retain CSRF protection')
+        for handler in ['', 'home.php', 'telegram.php', 'telegram.php?view=conversations', 'telegram.php?view=activities', 'telegram-announcements.php']:
+            code,body,_=request('/'+folder+'/'+handler)
+            check(code==200 and body.count(b'class="admin-layout"')==1 and body.count(b'class="admin-sidebar"')==1,'one shared layout per admin page: '+handler)
+            check(body.count(b'aria-current="page"')==1 and b'aria-controls="admin-navigation"' in body,'active navigation and mobile drawer semantics: '+handler)
+            check(b'?asset=admin-css' in body and b'app.js' in body,'shared self-hosted theme and interaction bundle: '+handler)
+        code,css,headers=request('/'+folder+'/telegram.php?asset=admin-css')
+        check(code==200 and b'.admin-sidebar' in css and b'.el-table' in css and 'text/css' in headers.get('Content-Type',''),'authenticated Element Plus theme follows admin rename')
+        guest=urllib.request.build_opener(NoRedirect())
+        try: response=guest.open(origin+'/'+folder+'/telegram.php?asset=admin-css')
+        except urllib.error.HTTPError as e: response=e
+        check(response.status==303 and response.headers.get('Location')=='/'+folder+'/login.php','admin theme remains behind login')
         # Upload a tiny synthetic TIPA through the renamed action and verify its XHR redirect.
         game=next(iter(json.loads((storage/'state.json').read_text())['apps'].values()))
         payload=io.BytesIO()
@@ -75,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-admin-folder-') as t:
         (public/folder).rename(public/'admin');folder='admin'
         check(request('/admin/login.php')[0]==303 and request('/console_random_123/login.php')[0]==404,'renaming back restores default entry without alias')
         # Validate the generic Nginx page rule mirrors supported folder and handler shapes.
-        nginx=(ROOT/'deploy/nginx.conf.example').read_text();pattern=re.search(r'location ~ "([^"]+)"',nginx)[1]
+        nginx=(ROOT/'deploy/nginx.conf.example').read_text();pattern=next(p for p in re.findall(r'location ~ "([^"]+)"',nginx) if 'telegram-announcements' in p)
         check(all(re.fullmatch(pattern,p) for p in ['/admin','/admin/','/console_random_123/login.php','/CONSOLE-9/telegram-announcements.php']),'Nginx template matches renamed page shapes')
         check(all(not re.fullmatch(pattern,p) for p in ['/admin/.mtx-admin','/admin/secret.php','/admin/sub/login.php','/admin/loginXphp']), 'Nginx template only matches allowlisted page files')
         print(f'\n{count} admin-folder HTTP checks passed. Only a disposable copy was renamed.')

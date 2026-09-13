@@ -40,11 +40,11 @@ $jobs=array_reverse($a['jobs'],true);
 $waiting=count(array_filter($jobs,fn($j)=>in_array($j['delete_status'],['waiting','pending','retry'],true)));
 $deletionLabels=['none'=>'不删除','waiting'=>'等待删除','pending'=>'删除待确认','retry'=>'删除重试中','deleted'=>'已删除','failed'=>'删除失败，请手动核对','expired'=>'已超过删除时限'];
 ?>
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>机器人公告 · 满天星</title><link rel="stylesheet" href="<?=e($app->path('/assets/app.css'))?>"><script src="<?=e($app->path('/assets/app.js'))?>" defer></script><script src="<?=e($app->path('/assets/telegram-announcements.js'))?>" defer></script></head><body>
-<header class="topbar bot-topbar"><a class="brand" href="<?=e($app->path('/admin/'))?>">✳ 满天星<span class="brand-sub">UPDATE CENTER</span></a><a class="button quiet" href="<?=e($app->path('/admin/telegram.php'))?>">机器人连接</a></header>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>机器人公告 · 满天星</title><link rel="stylesheet" href="<?=e($app->path('/assets/app.css'))?>?v=admin2"><script src="<?=e($app->path('/assets/app.js'))?>?v=admin2" defer></script><script src="<?=e($app->path('/assets/telegram-announcements.js'))?>" defer></script><?php MTX\AdminLayout::assets($app); ?></head><body>
+<?php MTX\AdminLayout::begin($app,'公告管理','announcements'); ?>
 <main class="content bot-page announcement-page">
 <div class="page-heading"><div><div class="eyebrow">TELEGRAM / ANNOUNCEMENT</div><h1>机器人公告</h1><p class="muted">编辑卡片、定时投递、到时删除。</p></div><span class="subtle-tag"><?=$a['card']['schedule_enabled']?'定时发送已开启':'定时发送已关闭'?></span></div>
-<nav class="bot-tabs" aria-label="机器人管理"><a href="<?=e($app->path('/admin/telegram.php'))?>">连接与客服</a><a aria-current="page" href="<?=e($app->path('/admin/telegram-announcements.php'))?>">公告卡片</a><a href="<?=e($app->path('/admin/telegram.php'))?>?view=activities">活动设置</a><a href="<?=e($app->path('/admin/telegram.php'))?>?view=conversations">客服会话</a></nav>
+
 <?php if ($notice): ?><div class="notice <?=$notice['ok']?'success':'error'?>" role="status"><?=e($notice['text'])?></div><?php endif ?>
 <div class="announcement-grid"><section class="panel"><div class="section-title"><h2>编辑公告</h2><span class="muted">保存后再发送</span></div>
 <form method="post" class="announcement-form" id="announcement-form" action="<?=e($app->path('/admin/telegram-announcements.php'))?>"><?php hidden('save') ?>
@@ -69,4 +69,4 @@ $deletionLabels=['none'=>'不删除','waiting'=>'等待删除','pending'=>'删�
 <section class="panel bot-records"><div class="section-title"><h2>投递与删除记录</h2><span class="muted">最近 100 条已完成记录 + 待处理任务</span></div>
 <?php if (!$jobs): ?><div class="empty-state"><h3>还没有投递记录</h3><p>保存公告不会发送消息。测试或投递后，这里会显示结果。</p></div><?php else: ?><div class="bot-table-wrap"><table class="bot-table"><thead><tr><th>时间（北京时间）</th><th>位置 / 消息 ID</th><th>投递</th><th>删除</th></tr></thead><tbody><?php foreach ($jobs as $j): ?><tr><td><?=e(dateLabel($j['at']))?><br><?=e(['test'=>'管理员测试','manual'=>'手动投递','schedule'=>'定时投递'][$j['source']])?></td><td><?=e($j['chat_id']?:'待解析')?> / <?=e($j['message_id']?:'—')?></td><td><?=e($labels[$j['status']]??$j['status'])?><?=$j['code']?' · '.e($j['code']):''?></td><td><?=e($deletionLabels[$j['delete_status']]??$j['delete_status'])?><?php if ($j['delete_at']): ?><br><?=e(dateLabel($j['delete_at']))?><?php endif ?></td></tr><?php endforeach ?></tbody></table></div><?php endif ?>
 <p class="muted compact">发送超时或进程中断时，先在 Telegram 核对实际结果，系统不重复发送结果待确认的消息。删除失败时请检查权限并在 Telegram 手动处理。关闭自动删除只影响后续新消息。</p></section>
-<footer class="page-footer">MTX 机器人管理<span>文件存储 · 无数据库</span></footer></main></body></html>
+<footer class="page-footer">MTX 机器人管理<span>文件存储 · 无数据库</span></footer></main><?php MTX\AdminLayout::end(); ?></body></html>

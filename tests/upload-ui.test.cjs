@@ -28,7 +28,7 @@ function fixture(size = 12) {
     window:{location:{assign:url=>redirect=url}},navigator:{},
     XMLHttpRequest:FakeXHR,FormData:class {constructor(f){this.form=f;}},setTimeout,
   };
-  vm.runInNewContext(fs.readFileSync('public/assets/app.js','utf8'),context);
+  vm.runInNewContext(fs.readFileSync('frontend/legacy-admin.js','utf8'),context);
   handlers.submit({preventDefault(){}});
   return {xhr,button,progress,status,feedback,getRedirect:()=>redirect};
 }
