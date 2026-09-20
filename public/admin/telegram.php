@@ -21,6 +21,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
             case 'conversation_config': $bot->conversations->configure($_POST);$notice='会话记录设置已保存。缩短保留期时，超期记录已清理。';break;
             case 'trial_save': $trials->save($_POST);$notice='活动设置已保存，新欢迎卡片即时生效。';break;
             case 'trial_import': $import=$trials->import($_POST);$notice='已导入 '.$import['added'].' 张，跳过重复或已分配卡 '.$import['skipped'].' 张。';break;
+            case 'trial_cards_delete': $deleted=$trials->deleteCards($_POST);$notice='已删除 '.$deleted.' 张未分配库存卡密，活动和领取记录保留。';break;
             case 'trial_pause': $trials->pause($_POST);$notice='领取已暂停，旧卡片按钮也停止发卡；库存和限领记录保留。';break;
             case 'trial_delete': $trials->delete($_POST);$notice='活动与库存原文已删除。当天限领记录和已分配卡指纹保留，避免重复发卡。';break;
             case 'save': $bot->saveSettings($_POST);$notice='配置已保存，尚未启用。部署到 HTTPS 后点击启用。';break;

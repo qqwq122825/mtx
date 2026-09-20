@@ -117,7 +117,7 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         page=request(activity)
         check(page[0]==200 and page[2].get('Cache-Control')=='no-store' and '活动设置'.encode() in page[1],'activity panel is served privately on existing admin route')
         check(request(activity,method='PUT')[0]==405,'activity mutation rejects PUT')
-        for action in ['trial_save','trial_import','trial_pause','trial_delete']:
+        for action in ['trial_save','trial_import','trial_pause','trial_delete','trial_cards_delete']:
             check(request(activity,fields={'csrf':'bad','action':action})[0]==403,'activity action requires CSRF: '+action)
         def trial_fields(action,**extra):
             revision=json.loads(statepath.read_text()).get('trials',{}).get('revision',0)
@@ -130,10 +130,27 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         fixture_cards='HTTP_TRIAL_FIXTURE_001\nHTTP_TRIAL_FIXTURE_002'
         check(request(activity,fields=trial_fields('trial_import',codes=fixture_cards))[0]==303,'import synthetic inventory through password panel')
         page=request(activity)[1]
-        check(b'HTTP_TRIAL_FIXTURE_' not in page and b'id="trial-codes"' in page,'inventory plaintext not echoed after import')
+        check(b'HTTP_TRIAL_FIXTURE_001' in page and b'id="stock-delete"' in page and b'name="cards[]"' in page,'authenticated inventory displays cards and deletion controls')
         current=json.loads(statepath.read_text());check(len(current['trials']['cards'])==2,'two cards saved privately')
         request(activity,fields=trial_fields('trial_import',codes=fixture_cards))
         check(len(json.loads(statepath.read_text())['trials']['cards'])==2,'duplicate HTTP import does not multiply stock')
+        import hashlib
+        card1=hashlib.sha256(b'HTTP_TRIAL_FIXTURE_001').hexdigest()
+        card2=hashlib.sha256(b'HTTP_TRIAL_FIXTURE_002').hexdigest()
+        check(request(activity+'&stock_status=delivered')[0]==200 and b'HTTP_TRIAL_FIXTURE_' not in request(activity+'&stock_status=delivered')[1],'inventory filters by status')
+        check(request(activity,fields=trial_fields('trial_cards_delete',card=card1))[0]==303,'single-card deletion through authenticated HTTP')
+        check(list(json.loads(statepath.read_text())['trials']['cards'])==[card2],'single delete removes only selected stock')
+        check(request(activity,fields=trial_fields('trial_cards_delete',**{'cards[]':card2}))[0]==303,'bulk-card deletion through authenticated HTTP')
+        check(not json.loads(statepath.read_text())['trials']['cards'] and json.loads(statepath.read_text())['trials']['activity'],'bulk deletion keeps activity')
+        many_cards='\n'.join(f'HTTP_PAGE_FIXTURE_{i:03}' for i in range(51))
+        request(activity,fields=trial_fields('trial_import',codes=many_cards))
+        page1=request(activity)[1];page2=request(activity+'&page=2')[1]
+        check(b'HTTP_PAGE_FIXTURE_049' in page1 and b'HTTP_PAGE_FIXTURE_050' not in page1 and b'HTTP_PAGE_FIXTURE_050' in page2 and b'HTTP_PAGE_FIXTURE_000' not in page2,'inventory paginates without exposing every card at once')
+        fields=trial_fields('trial_cards_delete')
+        fields.update({f'cards[{i}]':hashlib.sha256(f'HTTP_PAGE_FIXTURE_{i:03}'.encode()).hexdigest() for i in range(51)})
+        request(activity,fields=fields)
+        check(not json.loads(statepath.read_text())['trials']['cards'],'multi-card form removes selected page fixtures')
+        request(activity,fields=trial_fields('trial_import',codes=fixture_cards))
         request(activity,fields=trial_fields('trial_save',title='领取单透测试卡',enabled='1'))
         check(json.loads(statepath.read_text())['trials']['activity']['enabled'],'admin can enable stocked activity without sending messages')
         stale=trial_fields('trial_save',title='stale form',enabled='1')

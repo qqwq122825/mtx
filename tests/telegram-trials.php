@@ -44,6 +44,22 @@ try {
  check($claim(40004,7,$now+1)['kind']==='closed','old activity buttons never claim from recreated inventory');
  check($claim(10001,8,$now+1,$new)['kind']==='claimed','recreating activity does not reset today limits');
  check(TelegramTrials::summary($store->read())['available']===1,'denied claims do not consume new stock');
+ // Inventory removal must be atomic and must recheck allocation (claims do not bump revision).
+ $hash4=hash('sha256','Fixture_Card_4');
+ check(rejects(fn()=>$trials->deleteCards($rev()),422),'empty card selection rejected');
+ check(rejects(fn()=>$trials->deleteCards($rev()+['cards'=>['bad']]),422),'malformed card selection rejected');
+ check(rejects(fn()=>$trials->deleteCards(['revision'=>'0','card'=>$hash4]),409),'stale card deletion rejected');
+ $import("Fixture_Card_5\nFixture_Card_6");$hash5=hash('sha256','Fixture_Card_5');$hash6=hash('sha256','Fixture_Card_6');
+ $staleDelete=$rev()+['cards'=>[$hash4,$hash5]];
+ $claim(50005,9,$now+1,$new);
+ $beforeDelete=TelegramTrials::read($store->read());
+ check(rejects(fn()=>$trials->deleteCards($staleDelete),409) && TelegramTrials::read($store->read())===$beforeDelete,'claim racing deletion protects allocated card and entire batch');
+ check(rejects(fn()=>$trials->deleteCards($rev()+['cards'=>[$hash5,str_repeat('a',64)]]),409) && TelegramTrials::read($store->read())===$beforeDelete,'missing card rejects entire batch');
+ check($trials->deleteCards($rev()+['card'=>$hash5,'cards'=>[$hash4]])===1,'single-card submit ignores unrelated checkbox selection');
+ check($trials->deleteCards($rev()+['cards'=>[$hash6,$hash6]])===1,'bulk removal deduplicates selected hashes');
+ $afterDelete=TelegramTrials::read($store->read());
+ check($afterDelete['activity']===$beforeDelete['activity'] && $afterDelete['used']===$beforeDelete['used'] && $afterDelete['claims']===$beforeDelete['claims'] && isset($afterDelete['cards'][$hash4]),'inventory deletion preserves activity, assigned cards and claim history');
+ check($claim(50005,10,$now+1,$new)['repeat'],'repeat claim still works after inventory removal');
  // Clear only this synthetic fixture for current-time relay tests.
  $store->locked(function(&$s)use($store){$s=TelegramStore::emptyState();$store->save($s);});$save();$import(implode("\n",array_map(fn($i)=>'RELAY_FIXTURE_CARD_'.$i,range(1,30))));$save(true);
  $calls=[];$failure=null;$mid=200;

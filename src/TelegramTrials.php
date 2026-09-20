@@ -64,6 +64,26 @@ final class TelegramTrials
             $t['revision']++;$s['trials']=$t;$this->store->save($s);return ['added'=>$added,'skipped'=>$skipped];
         });
     }
+    /** Delete only unallocated cards, rechecking ownership under the allocation lock. */
+    public function deleteCards(#[\SensitiveParameter] array $input): int
+    {
+        $hashes=isset($input['card'])?[Http::text($input,'card',64)]:($input['cards']??[]);
+        if (!is_array($hashes) || !$hashes || count($hashes)>100) throw new Problem(422,'请选择 1–100 张未分配卡密。');
+        foreach ($hashes as $hash) {
+            if (!is_string($hash) || !preg_match('/\A[a-f0-9]{64}\z/D',$hash)) throw new Problem(422,'卡密标识格式异常。');
+        }
+        $hashes=array_unique($hashes);
+        return $this->store->locked(function (&$s) use ($input,$hashes) {
+            $t=self::read($s);self::revision($t,$input);
+            foreach ($hashes as $hash) {
+                if (!isset($t['cards'][$hash])) throw new Problem(409,'部分卡密已删除，请刷新页面后操作。');
+                if ($t['cards'][$hash]['status']!=='available' || $t['cards'][$hash]['peer']!==0 || isset($t['used'][$hash])) throw new Problem(409,'部分卡密已分配，请刷新后仅选择未分配库存。');
+            }
+            foreach ($hashes as $hash) unset($t['cards'][$hash]);
+            $t['revision']++;$s['trials']=$t;$this->store->save($s);
+            return count($hashes);
+        });
+    }
     public function pause(#[\SensitiveParameter] array $input): void
     {
         $this->store->locked(function (&$s) use ($input) {
