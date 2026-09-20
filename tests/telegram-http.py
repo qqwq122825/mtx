@@ -131,6 +131,9 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         check(request(activity,fields=trial_fields('trial_import',codes=fixture_cards))[0]==303,'import synthetic inventory through password panel')
         page=request(activity)[1]
         check(b'HTTP_TRIAL_FIXTURE_001' in page and b'id="stock-delete"' in page and b'name="cards[]"' in page,'authenticated inventory displays cards and deletion controls')
+        check(b'value="HTTP_TRIAL_FIXTURE_001"' in page and '查看卡密 ·'.encode() not in page and '完整卡密直接显示'.encode() in page,'inventory shows card values directly without an expand step')
+        check(b'id="stock-select-all"' in page and b'id="stock-selection-count"' in page and b'data-stock-bulk' in page,'inventory exposes select-all, selection count and bulk actions')
+        check(request('/assets/telegram-activities.js')[0]==200,'inventory selection script is routed successfully')
         current=json.loads(statepath.read_text());check(len(current['trials']['cards'])==2,'two cards saved privately')
         request(activity,fields=trial_fields('trial_import',codes=fixture_cards))
         check(len(json.loads(statepath.read_text())['trials']['cards'])==2,'duplicate HTTP import does not multiply stock')
@@ -159,6 +162,12 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         check(not json.loads(statepath.read_text())['trials']['activity']['enabled'] and '配置已变化'.encode() in request(activity)[1],'stale form does not reactivate a paused activity')
         request(activity,fields=trial_fields('trial_delete',confirm_delete='bad'))
         check(len(json.loads(statepath.read_text())['trials']['cards'])==2,'delete rejected without typed confirmation')
+        claimed_state=json.loads(statepath.read_text())
+        claimed_state['trials']['cards'][card1].update(status='delivered',peer=12345678,day='2026-09-21',at=int(time.time()))
+        statepath.write_text(json.dumps(claimed_state))
+        claim_page=request(activity)[1]
+        claim_records=claim_page.split('<h2>领取记录</h2>'.encode(),1)[1].split('</section>'.encode(),1)[0]
+        check('原始卡密'.encode() in claim_records and b'value="HTTP_TRIAL_FIXTURE_001"' in claim_records and b'#12345678' in claim_records and b'HTTP_TRIAL_FIXTURE_002' not in claim_records,'claim history directly shows original allocated card with owner, excluding unallocated inventory')
         request(activity,fields=trial_fields('trial_delete',confirm_delete='删除活动'))
         current=json.loads(statepath.read_text())['trials']
         check(current['activity'] is None and not current['cards'],'confirmed delete purges activity and plaintext inventory')
