@@ -4,6 +4,7 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn';
 import 'element-plus/dist/index.css';
 import './admin.css';
 import './legacy-admin.js';
+import './activities.js';
 
 const sidebar=document.querySelector('.admin-sidebar'),mobile=window.matchMedia('(max-width:760px)');
 const layout=document.querySelector('.admin-layout'),toggle=document.querySelector('.admin-menu-toggle'),scrim=document.querySelector('.admin-nav-scrim');
@@ -56,7 +57,7 @@ function table(host,columns,rows,{search=true}={}){
   });}}).mount(host);
 }
 document.querySelectorAll('table.bot-table').forEach(original=>{
-  if(original.querySelector('button,input,form')||(original.querySelector('a')&&!original.hasAttribute('data-installer-table')))return;
+  if(original.id.startsWith('trial-')||original.querySelector('button,input,form')||(original.querySelector('a')&&!original.hasAttribute('data-installer-table')))return;
   const heads=Array.from(original.querySelectorAll('thead th')).map((n,i)=>({key:'c'+i,label:n.textContent.trim()}));
   if(!heads.length)return;
   const rows=Array.from(original.querySelectorAll('tbody tr')).map((tr,i)=>{

@@ -17,7 +17,7 @@ if ($path==='/home.css') {
 if (str_starts_with($path,$mount.'/')) {
     $route=substr($path,strlen($mount));$GLOBALS['mtx_route']=$route;
     $routes=['/api/telegram-webhook.php'=>'api/telegram-webhook.php','/api/update.php'=>'api/update.php','/api/download-ticket.php'=>'api/download-ticket.php','/api/download.php'=>'api/download.php'];
-    if (in_array($route,['/assets/app.css','/assets/app.js','/assets/telegram-announcements.js','/assets/telegram-activities.js'],true)) {
+    if (in_array($route,['/assets/app.css','/assets/app.js','/assets/telegram-announcements.js'],true)) {
         MTX\Http::method('GET','HEAD');
         header('Content-Type: '.(str_ends_with($route,'.css')?'text/css':'text/javascript').'; charset=utf-8');
         header('Cache-Control: public, max-age=300');

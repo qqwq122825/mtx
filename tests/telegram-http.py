@@ -132,8 +132,8 @@ with tempfile.TemporaryDirectory(prefix='mtx-telegram-http-') as t:
         page=request(activity)[1]
         check(b'HTTP_TRIAL_FIXTURE_001' in page and b'id="stock-delete"' in page and b'name="cards[]"' in page,'authenticated inventory displays cards and deletion controls')
         check(b'value="HTTP_TRIAL_FIXTURE_001"' in page and '查看卡密 ·'.encode() not in page and '完整卡密直接显示'.encode() in page,'inventory shows card values directly without an expand step')
-        check(b'id="stock-select-all"' in page and b'id="stock-selection-count"' in page and b'data-stock-bulk' in page,'inventory exposes select-all, selection count and bulk actions')
-        check(request('/assets/telegram-activities.js')[0]==200,'inventory selection script is routed successfully')
+        check(b'id="trial-stock-table"' in page and b'id="trial-claims-table"' in page and b'?v=trial-table-3' in page,'activity tables mount from versioned existing Element Plus bundle')
+        check(b'asset=activities-js' not in page and b'/assets/telegram-activities.js' not in page,'activity page requires no standalone selection script or new nginx rule')
         current=json.loads(statepath.read_text());check(len(current['trials']['cards'])==2,'two cards saved privately')
         request(activity,fields=trial_fields('trial_import',codes=fixture_cards))
         check(len(json.loads(statepath.read_text())['trials']['cards'])==2,'duplicate HTTP import does not multiply stock')
