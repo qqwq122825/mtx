@@ -60,6 +60,25 @@ with tempfile.TemporaryDirectory(prefix='mtx-home-http-') as t:
         check(upload(b'bad')[0]==422,'invalid archive rejected')
         check(upload(payload.getvalue())[0]==303,'upload game installer')
         check(b'/installer?game_id=1' in request(origin+'/?view=downloads')[1],'per game download on list')
+        statepath=storage/'state.json'
+        state=json.loads(statepath.read_text())
+        state['home_installers']['1']['uploaded_at']='2026-09-22T18:30:00+00:00'
+        statepath.write_text(json.dumps(state))
+        page=request(origin+'/?view=downloads')[1]
+        check(b'2026-09-23 02:30' in page and b'datetime="2026-09-23T02:30:00+08:00"' in page,'installer upload time displayed in Shanghai timezone across midnight')
+        check(page.count('更新时间'.encode())==1,'external installer link has no invented upload date')
+        for bad in [None,'','invalid-date']:
+            state['home_installers']['1']['uploaded_at']=bad
+            statepath.write_text(json.dumps(state))
+            status,page,_=request(origin+'/?view=downloads')
+            check(status==200 and '更新时间：暂无记录'.encode() in page,'missing or invalid upload timestamp keeps download available')
+        check(upload(payload.getvalue())[0]==303,'replace installer upload')
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        updated=json.loads(statepath.read_text())['home_installers']['1']['uploaded_at']
+        expected=datetime.fromisoformat(updated).astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M')
+        page=request(origin+'/?view=downloads')[1]
+        check(expected.encode() in page and b'2026-09-23 02:30' not in page,'replacement shows newest installer upload timestamp')
         code,body,headers=request(origin+'/installer?game_id=1')
         check(code==200 and body==payload.getvalue() and 'attachment' in headers['Content-Disposition'],'public download bytes match installer')
         check(request(origin+'/installer?game_id=999')[0] in (404,422),'unknown game rejected')

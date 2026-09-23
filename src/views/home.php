@@ -10,7 +10,14 @@ $downloads=($_GET['view']??'')==='downloads';
 $items=[];
 foreach ($state['apps'] as $game) {
     $installer=$state['home_installers'][(string)$game['game_id']]??null;
-    if ($installer) $items[]=['name'=>$game['name'],'url'=>'/installer?game_id='.(int)$game['game_id'],'meta'=>strtoupper($installer['extension']).' · '.number_format($installer['bytes']/1048576,2).' MiB'];
+    if ($installer) {
+        $updatedAt=null;
+        if (is_string($installer['uploaded_at']??null) && trim($installer['uploaded_at'])!=='') {
+            try { $updatedAt=(new DateTimeImmutable($installer['uploaded_at']))->setTimezone(new DateTimeZone('Asia/Shanghai')); }
+            catch (Exception) { /* Older inventory may not contain a usable upload timestamp. */ }
+        }
+        $items[]=['name'=>$game['name'],'url'=>'/installer?game_id='.(int)$game['game_id'],'meta'=>strtoupper($installer['extension']).' · '.number_format($installer['bytes']/1048576,2).' MiB','updated_at'=>$updatedAt];
+    }
 }
 if ($home['download_url']!=='') $items[]=['name'=>'通用安装器','url'=>$home['download_url'],'meta'=>'安装器下载'];
 ?>
@@ -29,7 +36,7 @@ if ($home['download_url']!=='') $items[]=['name'=>'通用安装器','url'=>$home
 <main class="downloads-main"><div class="page-heading"><span class="eyebrow">DOWNLOADS</span><h1>下载中心<span class="heading-dot" aria-hidden="true">.</span></h1><p>选择游戏，获取对应安装器。</p></div>
 <section class="library" aria-label="安装器列表"><div class="library-heading"><h2>游戏安装器</h2><span><?=count($items)?> 款</span></div>
 <?php if ($items): ?><div class="download-list"><?php foreach ($items as $item): ?>
-<article class="download-item"><span class="app-icon" aria-hidden="true">✳</span><div class="app-info"><h3><?=MTX\Http::escape($item['name'])?></h3><p><?=MTX\Http::escape($item['meta'])?></p></div><a class="download-button" href="<?=MTX\Http::escape($item['url'])?>" aria-label="下载<?=MTX\Http::escape($item['name'])?>" rel="noopener noreferrer">下载 <span aria-hidden="true">↓</span></a></article>
+<article class="download-item"><span class="app-icon" aria-hidden="true">✳</span><div class="app-info"><h3><?=MTX\Http::escape($item['name'])?></h3><p><?=MTX\Http::escape($item['meta'])?></p><?php if ($item['updated_at']??null): ?><p>更新时间：<time datetime="<?=MTX\Http::escape($item['updated_at']->format('c'))?>"><?=MTX\Http::escape($item['updated_at']->format('Y-m-d H:i'))?></time>（北京时间）</p><?php elseif (array_key_exists('updated_at',$item)): ?><p>更新时间：暂无记录</p><?php endif ?></div><a class="download-button" href="<?=MTX\Http::escape($item['url'])?>" aria-label="下载<?=MTX\Http::escape($item['name'])?>" rel="noopener noreferrer">下载 <span aria-hidden="true">↓</span></a></article>
 <?php endforeach ?></div>
 <?php else: ?><div class="empty"><div class="empty-icon" aria-hidden="true">↓</div><h3>安装器准备中</h3><p>开放下载后，会显示在这里。</p><a class="empty-back" href="/">返回主页 <span aria-hidden="true">↗</span></a></div><?php endif ?>
 </section></main>
